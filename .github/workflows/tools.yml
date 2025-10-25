@@ -77,6 +77,10 @@ jobs:
           name: macos-latest-config
           path: ${{ env.WORKPATH }}/openwrt/.config
 
+      - name: Setup tmate session
+        if: always()
+        uses: mxschmitt/action-tmate@v3
+
   check-linux-buildbot:
     name: Check tools with buildbot container
     uses: ./.github/workflows/reusable_check-tools.yml
