@@ -104,7 +104,7 @@ jobs:
       - name: Determine base branch tag
         id: determine_base_branch
         run: |
-          BASE_BRANCH=main
+          BASE_BRANCH=hauke-actions
           if [ -n "${{ github.base_ref }}" ]; then
             if echo "${{ github.base_ref }}" | grep -q -E '^openwrt-[0-9][0-9]\.[0-9][0-9]$'; then
               BASE_BRANCH="${{ github.base_ref }}"
@@ -133,7 +133,7 @@ jobs:
       - name: Determine container name
         id: determine_container_name
         env:
-          CONTAINER_TAG: ${{ steps.determine_base_branch.outputs.base_branch != 'main' && steps.determine_base_branch.outputs.base_branch || 'latest' }}
+          CONTAINER_TAG: ${{ steps.determine_base_branch.outputs.base_branch != 'hauke-actions' && steps.determine_base_branch.outputs.base_branch || 'latest' }}
         run: |
           CONTAINER_NAME=${{ inputs.container_name }}
           CONTAINER_TAG=${{ env.CONTAINER_TAG }}
@@ -159,7 +159,7 @@ jobs:
 
       - name: Determine ccache tag
         id: determine_ccache_tag
-        if: steps.determine_base_branch.outputs.base_branch != 'main'
+        if: steps.determine_base_branch.outputs.base_branch != 'hauke-actions'
         run: echo "ccache_tag=${{ format('-{0}', steps.determine_base_branch.outputs.base_branch) }}" >> $GITHUB_OUTPUT
 
       - name: Determine ccache name

@@ -127,11 +127,11 @@ jobs:
         env:
           TARGET_SUBTARGET: ${{ steps.issue-parser.outputs.issueparser_target }}
           DEVICE: ${{ steps.issue-parser.outputs.issueparser_device }}
-          BRANCH: ${{ steps.check_release.outputs.release != 'SNAPSHOT' && steps.check_release.outputs.release || 'main' }}
+          BRANCH: ${{ steps.check_release.outputs.release != 'SNAPSHOT' && steps.check_release.outputs.release || 'hauke-actions' }}
           DUMP_TARGET_INFO_SCRIPT: scripts/dump-target-info.pl
         run: |
           BRANCH=${{ env.BRANCH }}
-          [ $BRANCH != "main" ] && [ -z $( echo $BRANCH | grep -Po '^openwrt-[0-9]+\.[0-9]+$' ) ] && BRANCH=openwrt-$(echo ${{ env.BRANCH }} | sed 's/^v\([0-9]\+\.[0-9]\+\)\.[0-9]\(-rc[0-9]\+\)*$/\1/')
+          [ $BRANCH != "hauke-actions" ] && [ -z $( echo $BRANCH | grep -Po '^openwrt-[0-9]+\.[0-9]+$' ) ] && BRANCH=openwrt-$(echo ${{ env.BRANCH }} | sed 's/^v\([0-9]\+\.[0-9]\+\)\.[0-9]\(-rc[0-9]\+\)*$/\1/')
 
           # Checkout upstream version of the DUMP_TARGET_INFO_SCRIPT
           git checkout -q origin/$BRANCH ${{ env.DUMP_TARGET_INFO_SCRIPT }}
