@@ -7,7 +7,7 @@ on:
 
 jobs:
   coverity_build:
-    if: github.repository_owner == 'openwrt'
+    if: github.repository_owner == 'hauke'
     name: Coverity x86/64 build
     secrets:
       coverity_api_token: ${{ secrets.coverity_api_token }}

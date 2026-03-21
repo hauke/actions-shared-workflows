@@ -39,7 +39,7 @@ jobs:
       - name: Checkout formalities
         uses: actions/checkout@v6
         with:
-          repository: openwrt/actions-shared-workflows
+          repository: hauke/actions-shared-workflows
           path: workflow_context
           sparse-checkout: |
             .github/scripts/check_formalities.sh

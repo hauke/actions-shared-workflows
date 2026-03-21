@@ -165,7 +165,7 @@ jobs:
       build_kernel: true
       build_all_kmods: true
       build_dtb: true
-      upload_ccache_cache: ${{ github.repository_owner == 'openwrt' }}
+      upload_ccache_cache: ${{ github.repository_owner == 'hauke' }}
       check_packages_list: ${{ needs.determine_changed_packages.outputs.changed_packages }}
 
   check-kernel-patches:
@@ -185,7 +185,7 @@ jobs:
       testing: ${{ matrix.testing != '' }}
 
   upload-ccache-cache-in-s3:
-    if: github.event_name == 'push' && github.repository_owner == 'openwrt'
+    if: github.event_name == 'push' && github.repository_owner == 'hauke'
     name: Upload ccache cache to s3
     needs: [determine_targets, build]
     strategy:

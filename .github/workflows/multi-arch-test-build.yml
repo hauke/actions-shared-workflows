@@ -217,7 +217,7 @@ jobs:
         if: ${{ matrix.runtime_test && fromJSON(env.HAVE_PKGS) }}
         uses: actions/checkout@v6
         with:
-          repository: openwrt/actions-shared-workflows
+          repository: hauke/actions-shared-workflows
           path: dockerfiles_feeds
           sparse-checkout: |
             .github/scripts/ci_helpers.sh

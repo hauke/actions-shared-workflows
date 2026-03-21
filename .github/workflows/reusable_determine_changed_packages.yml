@@ -27,7 +27,7 @@ jobs:
       - name: Checkout shared workflows tools
         uses: actions/checkout@v6
         with:
-          repository: openwrt/actions-shared-workflows
+          repository: hauke/actions-shared-workflows
           path: shared-workflows
           sparse-checkout: .github/scripts/get_changed_packages.pl
 

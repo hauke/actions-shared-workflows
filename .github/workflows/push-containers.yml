@@ -67,7 +67,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          repository: openwrt/actions-shared-workflows
+          repository: hauke/actions-shared-workflows
           sparse-checkout: .github/dockerfiles/Dockerfile.tools
           sparse-checkout-cone-mode: false
 
@@ -166,7 +166,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          repository: openwrt/actions-shared-workflows
+          repository: hauke/actions-shared-workflows
           sparse-checkout: .github/dockerfiles/Dockerfile.toolchain
           sparse-checkout-cone-mode: false
 
