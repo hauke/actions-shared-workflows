@@ -774,6 +774,18 @@ jobs:
         if: github.event_name == 'push'
         run: rm -rf dl build_dir staging_dir
 
+      - name: Evict old ccache
+        if: inputs.use_ccache_cache == true && github.event_name == 'push'
+        shell: su buildbot -c "sh -e {0}"
+        working-directory: openwrt
+        run: staging_dir/host/bin/ccache --evict-older-than 1d
+
+      - name: Show ccache stats
+        if: inputs.use_ccache_cache == true
+        shell: su buildbot -c "sh -e {0}"
+        working-directory: openwrt
+        run: staging_dir/host/bin/ccache -vv --show-stats
+
       - name: Delete already present ccache cache
         if: steps.restore-ccache-cache.outputs.cache-hit == 'true' && inputs.use_ccache_cache == true  &&
           github.event_name == 'push' && steps.restore-ccache-cache-s3.outputs.cache-hit != 'true'
