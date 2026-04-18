@@ -539,6 +539,7 @@ jobs:
         run: |
           echo "CCACHE_CONFIGPATH2=staging_dir/host/etc/ccache.conf" >> "$GITHUB_ENV"
           echo "CCACHE_DIR=.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_LOGFILE=ccache.log" >> "$GITHUB_ENV"
 
         # ccache for some reason have problem detecting compiler type
         # with external toolchain. This cause the complete malfunction
@@ -688,6 +689,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make tools/install -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build toolchain
@@ -696,6 +698,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make toolchain/install -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build Kernel
@@ -705,6 +708,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make target/compile -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build Kernel Kmods
@@ -714,6 +718,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make package/linux/compile -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build DTBs
@@ -723,6 +728,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: |
           # Check if special dtb makefile target is available
           # For this to correctly work, a .config is required but this is already done by
@@ -739,6 +745,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build external toolchain
@@ -748,6 +755,7 @@ jobs:
         env:
           CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
           CCACHE_DIR: .ccache
+          CCACHE_LOGFILE: ccache.log
         run: make target/toolchain/compile -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Show ccache stats
@@ -813,6 +821,15 @@ jobs:
         with:
           name: ${{ inputs.target }}-${{ inputs.subtarget }}${{ inputs.testing == true && '-testing' || '' }}-logs
           path: "openwrt/logs"
+
+      - name: Upload ccache log
+        if: always() && inputs.use_ccache_cache == true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.target }}-${{ inputs.subtarget }}${{ inputs.testing == true && '-testing' || '' }}-ccache-log
+          path: openwrt/ccache.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Evict old ccache
         if: inputs.use_ccache_cache == true
