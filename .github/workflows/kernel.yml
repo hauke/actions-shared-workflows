@@ -2,6 +2,12 @@ name: Build Kernel
 
 on:
   workflow_call:
+    inputs:
+      target:
+        description: 'Target to rebuild ccache for (e.g. mediatek or mediatek/filogic). Empty = all targets.'
+        type: string
+        required: false
+        default: ''
     secrets:
       ccache_s3_endpoint:
       ccache_s3_bucket:
@@ -45,10 +51,17 @@ jobs:
         id: find_targets
         env:
           AFFECTED_KERNEL_VERSIONS: ${{ steps.determine_affected_kernel_versions.outputs.affected_kernel_versions }}
+          FILTER_TARGET: ${{ inputs.target }}
         run: |
           ALL_TARGETS="$(perl ./scripts/dump-target-info.pl targets 2>/dev/null)"
           TARGET_KERNELS="$(perl ./scripts/dump-target-info.pl kernels 2>/dev/null)"
           CHANGED_FILES="$(echo ${{ needs.determine_changed_files.outputs.all_changed_files }} | tr ' ' '\n')"
+
+          # On workflow_dispatch there are no "changed files"; force-include everything so
+          # the filter below picks up all targets (optionally narrowed by FILTER_TARGET).
+          if [ "${{ github.event_name }}" = 'workflow_dispatch' ]; then
+            CHANGED_FILES="target/linux/generic"
+          fi
 
           TARGETS_SUBTARGETS="$(echo "$ALL_TARGETS" | sort -u -t '/' -k1 | cut -d " " -f 1)"
           TARGETS="$(echo "$ALL_TARGETS" | sort -u -t '/' -k1,1 | cut -d " " -f 1)"
@@ -59,6 +72,12 @@ jobs:
               echo "$CHANGED_FILES" | grep -q target/linux/generic; then
               TARGETS_SUBTARGETS=$TARGETS
             fi
+          fi
+
+          # Narrow to FILTER_TARGET (e.g. "mediatek" or "mediatek/filogic") if provided
+          if [ -n "$FILTER_TARGET" ]; then
+            TARGETS_SUBTARGETS="$(echo "$TARGETS_SUBTARGETS" | grep -E "^${FILTER_TARGET}(/|$)" || true)"
+            TARGETS="$(echo "$TARGETS" | grep -E "^${FILTER_TARGET}(/|$)" || true)"
           fi
 
           JSON_TARGETS_SUBTARGETS='['
