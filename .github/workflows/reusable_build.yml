@@ -401,7 +401,7 @@ jobs:
 
       - name: Download and extract ccache cache from s3
         id: restore-ccache-cache-s3
-        if: inputs.use_ccache_cache == true &&
+        if: inputs.use_ccache_cache == true && github.repository_owner == 'openwrt' &&
             ( inputs.ccache_type != 'kernel' || inputs.upload_ccache_cache != true || github.event_name != 'push')
         working-directory: openwrt
         run: |
@@ -845,12 +845,13 @@ jobs:
 
       - name: Cleanup dl/build_dir/staging_dir to make some space
         working-directory: openwrt
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: rm -rf dl build_dir staging_dir
 
       - name: Delete already present ccache cache
         if: steps.restore-ccache-cache.outputs.cache-hit == 'true' && inputs.use_ccache_cache == true  &&
-          github.event_name == 'push' && steps.restore-ccache-cache-s3.outputs.cache-hit != 'true'
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          steps.restore-ccache-cache-s3.outputs.cache-hit != 'true'
         uses: octokit/request-action@v3.x
         with:
           route: DELETE /repos/{repository}/actions/caches?key={key}
@@ -860,7 +861,8 @@ jobs:
           INPUT_KEY: ${{ steps.restore-ccache-cache.outputs.cache-primary-key }}
 
       - name: Save ccache cache
-        if: inputs.use_ccache_cache == true && github.event_name == 'push' &&
+        if: inputs.use_ccache_cache == true &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
           steps.restore-ccache-cache-s3.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
