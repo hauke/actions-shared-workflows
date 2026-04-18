@@ -654,6 +654,29 @@ jobs:
         run: |
           echo CONFIG_USE_LLVM_PREBUILT=y >> .config
 
+      - name: Determine ccache compiler_check
+        if: inputs.use_ccache_cache == true
+        shell: su buildbot -c "sh -e {0}"
+        working-directory: openwrt
+        run: |
+          REV=
+          if [ "${{ inputs.build_toolchain }}" != "true" ] && [ -d /external-toolchain ]; then
+            GCC=$(find /external-toolchain -name '*-openwrt-linux-*-gcc' \( -type f -o -type l \) 2>/dev/null | head -n1)
+            if [ -n "$GCC" ]; then
+              REV=$("$GCC" --version | head -n1 | grep -oE 'r[0-9]+-[0-9a-f]+' | sed 's/^r[0-9]*-//')
+            fi
+          fi
+
+          if [ -n "$REV" ] && git cat-file -e "$REV" 2>/dev/null; then
+            SHA=$(git log -1 --format=%H "$REV" -- toolchain/gcc/ toolchain/binutils/)
+            echo "Using toolchain rev $REV from compiler -> last toolchain change $SHA"
+          else
+            SHA=$(git log -1 --format=%H -- toolchain/gcc/ toolchain/binutils/)
+            echo "Using HEAD-relative last toolchain change $SHA"
+          fi
+
+          echo "compiler_check=string:$SHA" >> $CCACHE_CONFIGPATH2
+
       - name: Show configuration
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
