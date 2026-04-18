@@ -557,12 +557,13 @@ jobs:
 
           echo CONFIG_CCACHE=y >> .config
 
+          echo "CCACHE_CONFIGPATH2=$SYSTEM_CCACHE_CONF" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=${{ github.workspace }}/openwrt/.ccache" >> "$GITHUB_ENV"
+
       - name: Reset ccache stats
         if: inputs.use_ccache_cache == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
         run: staging_dir/host/bin/ccache --zero-stats
 
       - name: Configure external toolchain in container
@@ -708,8 +709,6 @@ jobs:
         if: inputs.use_ccache_cache == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
         run: staging_dir/host/bin/ccache -vv --show-stats
 
       - name: Coverity prepare toolchain
