@@ -534,6 +534,12 @@ jobs:
           echo CONFIG_TARGET_PER_DEVICE_ROOTFS=y >> .config
           echo CONFIG_TARGET_ALL_PROFILES=y >> .config
 
+      - name: Export ccache environment
+        if: inputs.use_ccache_cache == true
+        run: |
+          echo "CCACHE_CONFIGPATH2=${{ github.workspace }}/openwrt/staging_dir/host/etc/ccache.conf" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=${{ github.workspace }}/openwrt/.ccache" >> "$GITHUB_ENV"
+
         # ccache for some reason have problem detecting compiler type
         # with external toolchain. This cause the complete malfunction
         # of ccache with the result of tons of unsupported compiler
@@ -543,22 +549,17 @@ jobs:
         if: inputs.use_ccache_cache == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
-        env:
-          SYSTEM_CCACHE_CONF: staging_dir/host/etc/ccache.conf
         run: |
-          touch $SYSTEM_CCACHE_CONF
+          touch $CCACHE_CONFIGPATH2
 
-          echo compiler_type=gcc >> $SYSTEM_CCACHE_CONF
-          [ ${{ inputs.ccache_type }} = 'kernel' ] && echo max_size=1G >> $SYSTEM_CCACHE_CONF
-          [ ${{ inputs.ccache_type }} = 'packages' ] && echo max_size=8G >> $SYSTEM_CCACHE_CONF
+          echo compiler_type=gcc >> $CCACHE_CONFIGPATH2
+          [ ${{ inputs.ccache_type }} = 'kernel' ] && echo max_size=1G >> $CCACHE_CONFIGPATH2
+          [ ${{ inputs.ccache_type }} = 'packages' ] && echo max_size=8G >> $CCACHE_CONFIGPATH2
 
-          echo depend_mode=true >> $SYSTEM_CCACHE_CONF
-          echo sloppiness=file_macro,locale,time_macros,include_file_ctime,include_file_mtime >> $SYSTEM_CCACHE_CONF
+          echo depend_mode=true >> $CCACHE_CONFIGPATH2
+          echo sloppiness=file_macro,locale,time_macros,include_file_ctime,include_file_mtime >> $CCACHE_CONFIGPATH2
 
           echo CONFIG_CCACHE=y >> .config
-
-          echo "CCACHE_CONFIGPATH2=$SYSTEM_CCACHE_CONF" >> "$GITHUB_ENV"
-          echo "CCACHE_DIR=${{ github.workspace }}/openwrt/.ccache" >> "$GITHUB_ENV"
 
       - name: Reset ccache stats
         if: inputs.use_ccache_cache == true
