@@ -537,8 +537,8 @@ jobs:
       - name: Export ccache environment
         if: inputs.use_ccache_cache == true
         run: |
-          echo "CCACHE_CONFIGPATH2=${{ github.workspace }}/openwrt/staging_dir/host/etc/ccache.conf" >> "$GITHUB_ENV"
-          echo "CCACHE_DIR=${{ github.workspace }}/openwrt/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_CONFIGPATH2=staging_dir/host/etc/ccache.conf" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=.ccache" >> "$GITHUB_ENV"
 
         # ccache for some reason have problem detecting compiler type
         # with external toolchain. This cause the complete malfunction
