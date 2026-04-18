@@ -662,29 +662,44 @@ jobs:
       - name: Build tools
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: make tools/install -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build toolchain
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: make toolchain/install -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build Kernel
         if: inputs.build_kernel == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: make target/compile -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build Kernel Kmods
         if: inputs.build_kernel == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: make package/linux/compile -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build DTBs
         if: inputs.build_dtb == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: |
           # Check if special dtb makefile target is available
           # For this to correctly work, a .config is required but this is already done by
@@ -698,6 +713,9 @@ jobs:
         if: inputs.build_full == true
         shell: su buildbot -c "sh -e {0}"
         working-directory: openwrt
+        env:
+          CCACHE_CONFIGPATH2: staging_dir/host/etc/ccache.conf
+          CCACHE_DIR: .ccache
         run: make -j$(nproc) BUILD_LOG=1 || ret=$? .github/workflows/scripts/show_build_failures.sh
 
       - name: Build external toolchain
