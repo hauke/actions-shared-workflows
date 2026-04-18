@@ -543,6 +543,7 @@ jobs:
         run: |
           echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
           echo "CCACHE_CONFIGPATH2=$CCACHE_CONFIGPATH2" >> "$GITHUB_ENV"
+          echo "CCACHE_LOGFILE=${{ github.workspace }}/openwrt/ccache.log" >> "$GITHUB_ENV"
 
         # ccache for some reason have problem detecting compiler type
         # with external toolchain. This cause the complete malfunction
@@ -794,6 +795,15 @@ jobs:
         with:
           name: ${{ inputs.target }}-${{ inputs.subtarget }}${{ inputs.testing == true && '-testing' || '' }}-logs
           path: "openwrt/logs"
+
+      - name: Upload ccache log
+        if: always() && inputs.use_ccache_cache == true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.target }}-${{ inputs.subtarget }}${{ inputs.testing == true && '-testing' || '' }}-ccache-log
+          path: openwrt/ccache.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Cleanup ccache
         if: inputs.use_ccache_cache == true && github.event_name == 'push'
