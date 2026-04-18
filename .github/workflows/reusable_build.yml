@@ -296,6 +296,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: openwrt
+          fetch-depth: 0
 
       - name: Checkout packages feed
         if: inputs.include_feeds == true
