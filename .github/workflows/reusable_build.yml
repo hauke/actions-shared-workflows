@@ -549,7 +549,8 @@ jobs:
           touch $SYSTEM_CCACHE_CONF
 
           echo compiler_type=gcc >> $SYSTEM_CCACHE_CONF
-          [ ${{ inputs.ccache_type }} = 'kernel' ] && echo max_size=800M >> $SYSTEM_CCACHE_CONF
+          [ ${{ inputs.ccache_type }} = 'kernel' ] && echo max_size=1G >> $SYSTEM_CCACHE_CONF
+          [ ${{ inputs.ccache_type }} = 'packages' ] && echo max_size=8G >> $SYSTEM_CCACHE_CONF
 
           echo depend_mode=true >> $SYSTEM_CCACHE_CONF
           echo sloppiness=file_macro,locale,time_macros >> $SYSTEM_CCACHE_CONF
