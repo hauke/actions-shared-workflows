@@ -62,8 +62,17 @@ jobs:
             [ -z "$entry" ] && continue
             num="${entry%%$'\t'*}"
             head="${entry##*$'\t'}"
-            last_sha=$(gh api "repos/$REPO/pulls/$num/reviews" \
-              --jq "[.[] | select(.user.login == \"$BOT_USER\")] | last | .commit_id // empty")
+            # Reviews come back oldest-first with no sort option, so read only
+            # the LAST page -- the bot's most recent review lives there. With 10
+            # per page this also re-reviews a PR once roughly 10 reviews/comments
+            # land after the bot's last one: that review drops off the last page,
+            # last_sha stops matching head, and the PR is queued again.
+            reviews="repos/$REPO/pulls/$num/reviews"
+            last_page=$(gh api -i "$reviews?per_page=10" \
+              | grep -i '^link:' | grep -o 'page=[0-9]*>; rel="last"' \
+              | grep -o '[0-9]\+' || true)
+            last_sha=$(gh api "$reviews?per_page=10&page=${last_page:-1}" \
+              --jq ".[] | select(.user.login == \"$BOT_USER\") | .commit_id" | tail -n1)
             if [ "$last_sha" != "$head" ]; then
               needs_review+=("$num")
               if [ ${#needs_review[@]} -ge "$MAX_PRS" ]; then break; fi
