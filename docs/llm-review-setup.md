@@ -9,8 +9,10 @@ forked-PR review works without exposing repo secrets to fork workflows.
 Two routines per consumer repository:
 
 - **PR review routine** — fired by `pull_request_target: [opened, reopened]`.
-  Posts a single GitHub PR review with a 1–2 sentence summary, optional
-  commit-vs-message checks, and inline line-anchored comments for issues.
+  Posts a single GitHub PR review with optional commit-vs-message checks and
+  inline line-anchored comments for issues. No summary and no recap of the
+  change: the body carries commit-check bullets only, and inline comments are
+  capped at three sentences plus an optional `suggestion` block.
 - **Nightly digest routine** — fired by an Actions cron at 03:00 UTC. Walks
   open PRs that have new commits since the last bot review and posts a new
   review covering only the newly-added commits. Workflow skips the API fire
