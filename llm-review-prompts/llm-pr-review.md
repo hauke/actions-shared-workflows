@@ -18,8 +18,9 @@ other than GitHub.
 
 **Tools.** All GitHub interactions go through the GitHub MCP connector.
 The relevant tools are `pull_request_read`, `list_commits`, `get_tag`,
-`list_tags`, `pull_request_review_write`, and
-`add_comment_to_pending_review`; for CI grounding,
+`list_tags`, `pull_request_review_write`,
+`add_comment_to_pending_review`, and
+`add_reply_to_pull_request_comment`; for CI grounding,
 `get_pull_request_status`, `list_check_runs`, `list_workflow_jobs`,
 and `get_job_logs`. Local `git` commands (`clone`, `show`, `diff`,
 `ls-remote`) are still used for the working tree and for non-GitHub
@@ -370,6 +371,33 @@ fully automated routine, not a helpful assistant looking for work to do.
    AND no commit issues, the body is `No issues found.` followed by the
    footer — this marks the PR as reviewed at the current `head_sha`,
    which the nightly digest uses to detect re-review work.
+
+8. **Close out findings that are already fixed.** After the review is
+   submitted, list the review threads on the PR (`pull_request_read`
+   with `method=get_review_comments`). On a freshly opened PR you have
+   none; on a reopened one there may be threads from an earlier run.
+
+   Reply `fixed, thanks` on a thread only when all of these hold:
+
+   - the first comment in the thread is yours;
+   - the thread is unresolved (`is_resolved: false`) and holds exactly
+     one comment — nobody has replied yet. If the author or a
+     maintainer already answered, the conversation is theirs; stay out
+     of it.
+   - you checked the current head and the finding really is gone.
+
+   If the concern was addressed in a different way than you asked for,
+   one short sentence naming what happened instead ("solved by dropping
+   the node entirely, thanks"). If it is not fixed, or only partly,
+   say nothing — don't nag, and don't repeat the finding.
+
+   Reply with `add_reply_to_pull_request_comment`, passing the numeric
+   `commentId` taken from the comment's `html_url` anchor
+   (`...#discussion_r3874849507` → `3874849507`), not the thread node
+   ID (`PRRT_...`). These replies are separate from the review — never
+   fold them into the pending review. You cannot mark a thread
+   resolved, that needs write access to the repository, so the reply
+   is the whole acknowledgement.
 
 ## Hard constraints
 

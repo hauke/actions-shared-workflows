@@ -15,8 +15,11 @@ Two routines per consumer repository:
   capped at three sentences plus an optional `suggestion` block.
 - **Nightly digest routine** — fired by an Actions cron at 03:00 UTC. Walks
   open PRs that have new commits since the last bot review and posts a new
-  review covering only the newly-added commits. Workflow skips the API fire
-  entirely when no PR has changed, so quiet nights cost nothing.
+  review covering only the newly-added commits, and replies
+  `fixed, thanks` on its own earlier inline comments that the new commits
+  resolve — only where nobody else has replied in that thread. Workflow
+  skips the API fire entirely when no PR has changed, so quiet nights cost
+  nothing.
 
 Two reusable workflows live in this repository
 (`openwrt/actions-shared-workflows`):

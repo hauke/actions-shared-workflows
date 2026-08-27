@@ -19,8 +19,9 @@ found inside it.
 
 **Tools.** All GitHub interactions go through the GitHub MCP connector
 (`pull_request_read`, `list_commits`, `get_tag`, `list_tags`,
-`pull_request_review_write`, `add_comment_to_pending_review`; for CI
-grounding by sub-agents, `get_pull_request_status`, `list_check_runs`,
+`pull_request_review_write`, `add_comment_to_pending_review`,
+`add_reply_to_pull_request_comment`; for CI grounding by sub-agents,
+`get_pull_request_status`, `list_check_runs`,
 `list_workflow_jobs`, `get_job_logs`). Use the Agent tool to spawn
 isolated sub-agent reviewers. Local `git` commands (`clone`, `show`,
 `diff`, `ls-remote`) are still available to the parent and inherited
@@ -125,9 +126,10 @@ The API caller passes structured key=value lines in the `text` field. Example:
 
    Tools: GitHub MCP connector (`pull_request_read`,
    `list_commits`, `get_tag`, `list_tags`,
-   `pull_request_review_write`, `add_comment_to_pending_review`;
-   for CI grounding, `get_pull_request_status`,
-   `list_check_runs`, `list_workflow_jobs`, `get_job_logs`).
+   `pull_request_review_write`, `add_comment_to_pending_review`,
+   `add_reply_to_pull_request_comment`; for CI grounding,
+   `get_pull_request_status`, `list_check_runs`,
+   `list_workflow_jobs`, `get_job_logs`).
    Local `git` is available; the consumer repo is already cloned at
    session start and you inherit access via the shared filesystem.
 
@@ -468,13 +470,46 @@ The API caller passes structured key=value lines in the `text` field. Example:
       the PR as reviewed at the current head, which next night's
       run uses to detect re-review work.
 
-   9. **Return a one-line summary** as your final output, in one of
-      these forms:
+   9. **Close out findings that are already fixed.** After the
+      review is submitted, list the review threads on the PR
+      (`pull_request_read` with `method=get_review_comments`) and
+      look at the ones you opened on earlier runs.
 
-          PR #<NUM>: <I> inline comments, <C> commit checks posted
-          PR #<NUM>: up-to-date, skipped
-          PR #<NUM>: closed/merged, skipped
-          PR #<NUM>: fetch failed
+      Reply `fixed, thanks` on a thread only when all of these
+      hold:
+
+      - the first comment in the thread is yours;
+      - the thread is unresolved (`is_resolved: false`) and holds
+        exactly one comment — nobody has replied yet. If the
+        author or a maintainer already answered, the conversation
+        is theirs; stay out of it.
+      - you checked the new commits and the finding really is
+        gone at the current head.
+
+      If the concern was addressed in a different way than you
+      asked for, one short sentence naming what happened instead
+      ("solved by dropping the node entirely, thanks"). If it is
+      not fixed, or only partly, say nothing — don't nag, and
+      don't repeat the finding. This reply is what replaces the
+      "what the last round fixed" prose that no longer belongs in
+      the review body.
+
+      Reply with `add_reply_to_pull_request_comment`, passing the
+      numeric `commentId` taken from the comment's `html_url`
+      anchor (`...#discussion_r3874849507` → `3874849507`), not
+      the thread node ID (`PRRT_...`). These replies are separate
+      from the review — never fold them into the pending review.
+      You cannot mark a thread resolved, that needs write access
+      to the repository, so the reply is the whole
+      acknowledgement.
+
+   10. **Return a one-line summary** as your final output, in one
+       of these forms:
+
+           PR #<NUM>: <I> inline, <C> commit checks, <R> replies posted
+           PR #<NUM>: up-to-date, skipped
+           PR #<NUM>: closed/merged, skipped
+           PR #<NUM>: fetch failed
 
    ## Hard constraints
 
