@@ -1,0 +1,23 @@
+name: ChatGPT review tooling checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/chatgpt-review-checks.yml'
+      - 'scripts/chatgpt-review/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run offline unit and Git fixture tests
+        run: python3 -B -m unittest discover -s scripts/chatgpt-review/tests -v
+      - name: Check shell syntax
+        run: sh -n scripts/chatgpt-review/prepare-worktrees.sh

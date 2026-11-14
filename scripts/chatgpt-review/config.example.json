@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "repositories": ["hauke/actions-shared-workflows"],
+  "max_prs": 8,
+  "max_comments": 20,
+  "max_comment_chars": 3000,
+  "max_commit_checks": 20,
+  "reference_repositories": []
+}
