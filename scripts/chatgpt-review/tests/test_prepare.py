@@ -211,6 +211,40 @@ class PreparationTests(unittest.TestCase):
         ):
             Git()
 
+    def test_transport_settings_survive_without_inheriting_credentials(self):
+        transport = {
+            "https_proxy": "http://managed-proxy.invalid:3128",
+            "HTTP_PROXY": "http://managed-proxy.invalid:3128",
+            "NO_PROXY": "localhost,127.0.0.1",
+            "GIT_SSL_CAINFO": "/trusted/runtime-ca.pem",
+            "SSL_CERT_FILE": "/trusted/runtime-ca.pem",
+        }
+        with mock.patch.dict(
+            os.environ,
+            {
+                **transport,
+                "GH_TOKEN": "do-not-inherit",
+                "GITHUB_TOKEN": "do-not-inherit",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_SSL_NO_VERIFY": "true",
+                "GIT_ASKPASS": "/untrusted/helper",
+                "SSH_AUTH_SOCK": "/untrusted/socket",
+            },
+            clear=True,
+        ):
+            runner = Git()
+        for name, value in transport.items():
+            self.assertEqual(runner.env[name], value)
+        for name in (
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GIT_CONFIG_COUNT",
+            "GIT_SSL_NO_VERIFY",
+            "SSH_AUTH_SOCK",
+        ):
+            self.assertNotIn(name, runner.env)
+        self.assertEqual(runner.env["GIT_ASKPASS"], "/bin/false")
+
     def test_clone_does_not_inherit_callers_repository_config(self):
         sentinel = self.root / "inherited-config"
         self.git(

@@ -143,11 +143,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class GitHub:
-    """GET only; no tokens, netrc, cookies, environment proxy, or redirected hosts."""
+    """GET only; use the runtime's proxy without GitHub tokens, netrc or cookies."""
 
     def __init__(self):
         self.opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), NoRedirect()
+            urllib.request.ProxyHandler(), NoRedirect()
         )
 
     def get(self, path):

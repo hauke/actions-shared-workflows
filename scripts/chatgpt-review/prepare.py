@@ -48,6 +48,25 @@ class Git:
             "GIT_ALLOW_PROTOCOL": "https",
             "GIT_LFS_SKIP_SMUDGE": "1",
         }
+        # Hosted execution may require its managed proxy for DNS and egress.
+        # Keep only transport routing and CA trust; never inherit tokens, Git
+        # configuration injection, credential helpers or TLS-verification bypasses.
+        for name in (
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+            "CURL_CA_BUNDLE",
+            "GIT_SSL_CAINFO",
+        ):
+            if name in os.environ:
+                self.env[name] = os.environ[name]
         self.prefix = [
             "git",
             "-c",

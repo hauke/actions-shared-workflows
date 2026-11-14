@@ -22,6 +22,21 @@ HTTP status and reset timestamp. Do not silently add personal credentials to
 work around a rate limit. Retry after reset or use a separately designed bot-only
 read service if the workload exceeds anonymous limits.
 
+Hosted runtimes may route permitted HTTPS requests through an environment proxy.
+The API client honors the runtime's standard proxy settings; Git retains only
+the standard proxy/no-proxy variables and explicitly supported CA-bundle settings
+alongside its restricted environment. GitHub requests still have no GitHub
+authentication, and TLS verification remains enabled. Proxy routing/authentication
+is separate from the GitHub account used by the connector. Do not copy proxy
+credentials or environment values into the repository or execution logs.
+
+If preliminary HTTPS probes succeed but discovery fails with `Temporary failure
+in name resolution`, check that the pinned tooling includes proxy support. The
+initial `4cc96ea` version disabled Python environment proxies and stripped them
+from Git subprocesses. Use an updated tooling commit and repeat the dry run.
+If the error persists, compare the probe and script execution environments and
+report which transport failed; do not enable broader access or substitute tokens.
+
 Start with a manually invoked Work task using a trusted local checkout of this
 repository and an output directory outside every reviewed checkout. Test that
 the actual environment can execute Python/Git and make the required GETs/fetches

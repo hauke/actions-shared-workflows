@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import sys
 import unittest
+import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -242,6 +243,28 @@ class DiscoveryTests(unittest.TestCase):
         request = opening.call_args.args[0]
         self.assertEqual(request.get_method(), "GET")
         self.assertNotIn("Authorization", request.headers)
+
+    def test_anonymous_client_keeps_runtime_https_proxy(self):
+        proxies = {"https": "http://managed-proxy.invalid:3128"}
+        with mock.patch("urllib.request.getproxies", return_value=proxies):
+            api = GitHub()
+        handlers = [
+            handler
+            for handler in api.opener.handlers
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        self.assertEqual(len(handlers), 1)
+        self.assertEqual(handlers[0].proxies, proxies)
+
+    def test_anonymous_client_works_without_proxy_configuration(self):
+        with mock.patch("urllib.request.getproxies", return_value={}):
+            api = GitHub()
+        self.assertFalse(
+            any(
+                isinstance(handler, urllib.request.ProxyHandler)
+                for handler in api.opener.handlers
+            )
+        )
 
 
 class ValidationTests(unittest.TestCase):
