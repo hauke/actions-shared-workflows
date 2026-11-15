@@ -225,6 +225,7 @@ class PreparationTests(unittest.TestCase):
                 **transport,
                 "GH_TOKEN": "do-not-inherit",
                 "GITHUB_TOKEN": "do-not-inherit",
+                "CHATGPT_REVIEW_GITHUB_TOKEN": "do-not-inherit",
                 "GIT_CONFIG_COUNT": "1",
                 "GIT_SSL_NO_VERIFY": "true",
                 "GIT_ASKPASS": "/untrusted/helper",
@@ -238,6 +239,7 @@ class PreparationTests(unittest.TestCase):
         for name in (
             "GH_TOKEN",
             "GITHUB_TOKEN",
+            "CHATGPT_REVIEW_GITHUB_TOKEN",
             "GIT_CONFIG_COUNT",
             "GIT_SSL_NO_VERIFY",
             "SSH_AUTH_SOCK",

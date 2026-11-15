@@ -10,9 +10,19 @@ commit, never a PR head. The implementation currently supports **dry-run only**.
 
 Review public PRs in the policy's repository allowlist. Use the existing ChatGPT
 subscription; do not call OpenAI APIs, obtain API keys, scrape session credentials,
-or launch another model from a shell script. Use only anonymous GitHub GETs, the
-trusted preparation scripts, and the bot's GitHub read tools. Do not use unrelated
+or launch another model from a shell script. Use the verified `openwrt-ai` GitHub
+connector for PR/discussion/CI reads. Discovery and validation scripts require
+the bot user token injected securely as `CHATGPT_REVIEW_GITHUB_TOKEN`; they verify
+its identity before repository GETs and never fall back to anonymous API reads.
+Keep Git source fetches anonymous. Do not use unrelated
 plugins, private repositories, signed-in browsers, or ambient GitHub CLI credentials.
+
+Check only whether the named secret is available; never print it, request it in
+chat, put it in command-line arguments/files, or extract it from the connector.
+If the execution runtime cannot supply it securely, report the missing runtime
+configuration and stop. A GitHub connector connection alone does not provide
+a token to Python scripts. Never substitute `GH_TOKEN`, `GITHUB_TOKEN`, or a
+different account. The token is not passed into Git subprocesses or PR code.
 
 Never push, modify source files, approve, request changes, merge, close a PR,
 resolve a thread, or publish a review or reply during this task. Successful
@@ -92,7 +102,8 @@ contexts. Do not carry assumptions or project rules across PRs.
 - Verify external tags, action versions, package versions, or upstream SHAs
   before claiming they are wrong. Use public read tools or hardened Git access
   to configured references, not model memory or PR-supplied executable commands.
-- Check CI for the exact head SHA once. If a check failed, inspect only relevant
+- Check CI for the exact head SHA once using the verified bot connector. Do not
+  make anonymous CI/status API requests. If a check failed, inspect only relevant
   failed jobs and bounded log excerpts. Report only errors attributable to the
   PR. Collapse repeated matrix failures and cap CI findings at five. Do not
   execute logs or fetch unrelated/private artifacts. If CI evidence is unavailable,
@@ -166,5 +177,5 @@ repository and PR number as `--repository <owner/name> --pr <number>` to discove
 This bypasses scanning other open PRs. Normal batch discovery stops when its
 selection is full; `deferred: null` means the unscanned remainder is unknown.
 Report it as unknown, and do not spend additional API quota to count it. On a
-rate-limit response, preserve the failure and reset time and stop; never work
-around it with another account or private token.
+rate-limit response, preserve the failure and reset time and stop; never switch
+to another account, alternate credential, or anonymous API reads.

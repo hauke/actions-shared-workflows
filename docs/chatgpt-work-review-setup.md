@@ -3,7 +3,7 @@
 This is a **dry-run implementation** of the batched reviewer in
 `llm-review-prompts/chatgpt-work-batched-pr-review.md`. It discovers public PRs,
 prepares Git worktrees, and validates structured findings into manual publishing
-previews. It makes no model/API calls and contains no GitHub publisher, review
+previews. It makes no model or OpenAI API calls and contains no GitHub publisher, review
 schedule, or automatic reply operation. Existing Claude workflows are unchanged.
 
 ## Requirements and environment
@@ -14,20 +14,29 @@ does not need an OpenAI API key. Subscription access does not guarantee enough
 allowance to review eight or sixteen large PRs in one run. Check actual usage
 and reduce the batch when necessary.
 
-The scripts need Python 3.11+, Git, a POSIX shell, disk space, and anonymous
-HTTPS access to `api.github.com`, `github.com`, and explicitly configured public
-reference hosts. They use the Python standard library only. Anonymous GitHub
-API limits can be reached while scanning many PRs/reviews; failures include the
-HTTP status and reset timestamp. Do not silently add personal credentials to
-work around a rate limit. Retry after reset or use a separately designed bot-only
-read service if the workload exceeds anonymous limits.
+The scripts need Python 3.11+, Git, a POSIX shell, disk space, and HTTPS access
+to `api.github.com`, `github.com`, and explicitly configured public reference
+hosts. They use the Python standard library only. Discovery and validation
+require an `openwrt-ai` user token in the protected runtime environment variable
+`CHATGPT_REVIEW_GITHUB_TOKEN`. There is no anonymous API fallback. Git source
+fetches remain anonymous and never receive that token.
+
+The API client verifies the token using `GET /user` before any repository reads,
+requiring login `openwrt-ai` and numeric ID `276137552`. It caches that verification
+for the current client invocation. Missing/invalid tokens and other identities
+are failures, not reasons to retry anonymously or use `hauke`.
+
+Authenticated requests use GitHub's user quota instead of the shared anonymous
+IP quota; rate limits still apply and failures report the reset time. See
+[GitHub authentication](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api)
+and [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
 
 Hosted runtimes may route permitted HTTPS requests through an environment proxy.
 The API client honors the runtime's standard proxy settings; Git retains only
 the standard proxy/no-proxy variables and explicitly supported CA-bundle settings
-alongside its restricted environment. GitHub requests still have no GitHub
-authentication, and TLS verification remains enabled. Proxy routing/authentication
-is separate from the GitHub account used by the connector. Do not copy proxy
+alongside its restricted environment. TLS verification remains enabled.
+Proxy routing/authentication is separate from the bot token and connector.
+Do not copy proxy
 credentials or environment values into the repository or execution logs.
 
 If preliminary HTTPS probes succeed but discovery fails with `Temporary failure
@@ -73,12 +82,29 @@ Availability, approval behavior, model limits, and UI labels may vary by surface
    and again immediately before preparing a publishing preview. Never fall back
    to another account. Removing/reconnecting accounts can change tool parameters;
    use the actual tool schema, not a stale saved connection ID.
-3. Keep all credentials in the connector's protected authorization mechanism.
-   Do not put PATs, cookies, ChatGPT sessions, or tokens into scripts, configuration,
-   the repository, logs, or untrusted worktrees. The scripts deliberately ignore
-   Git credentials and use only unauthenticated GitHub GETs and HTTPS Git remotes.
+3. Keep connector credentials in its protected authorization mechanism. For the
+   scripts, create a separate user token while signed in to GitHub as `openwrt-ai`,
+   and inject it as the protected runtime secret `CHATGPT_REVIEW_GITHUB_TOKEN`.
+   Prefer a fine-grained token with public-repository read access and no write
+   permissions. Verify access to each intended public endpoint; do not grant
+   private-repository access or expand permissions to solve an unrelated error.
+   An installation token that cannot identify a user through `/user` is unsupported.
+4. Never put a PAT into chat, shell arguments, scripts, policy JSON, this repository,
+   logs, or worktrees. Never print environment values. The scripts deliberately
+   ignore generic `GH_TOKEN`/`GITHUB_TOKEN` to avoid selecting personal credentials.
+   Git subprocesses do not inherit the dedicated API token.
 
-The scripts enforce their own allowlist, anonymous access, and validation. They
+Configure the named secret through the execution environment's supported secret
+mechanism, or a trusted local secret manager, before launching the scripts. Do
+not assume a personal Work web task offers arbitrary environment-secret injection.
+If that runtime cannot provide this secret securely, use a supported local/cloud
+runtime that can. The GitHub connector's OAuth token is not extracted by these
+scripts: being connected in ChatGPT does not populate the environment variable.
+Model-driven PR/discussion/CI reads should use the verified bot connector.
+A connector-only replacement for the scripts' HTTP transport would need an
+adapter; this implementation provides the authenticated user-token path.
+
+The scripts enforce their own allowlist, bot-token identity, GET-only access, and validation. They
 cannot restrict what the Work model can do through another enabled tool. Prompt
 instructions, identity JSON, a filesystem sandbox, and disconnecting `hauke` do
 not provide a `COMMENT`-only permission boundary for the general GitHub connector.
@@ -160,12 +186,11 @@ When discovery stops early, `scan_complete` is false and `deferred` is null:
 the remainder is unknown, not zero. Skipped/failed counts cover only inspected
 PRs. Do not enumerate the rest just to calculate a log count.
 
-The older `c81ec17` discovery scanned all reviews before applying the batch cap;
-on large repositories such as OpenWrt this could exhaust the anonymous quota
-even with `max_prs: 1`. Use the updated tooling and wait for the quota reset
-reported by GitHub before retrying. Early stopping reduces requests but does
-not remove rate limits, especially when many unchanged heads must be skipped
-or a PR has a large review history. Never add personal credentials automatically.
+Older tooling used anonymous API reads; `c81ec17` also scanned all review histories
+before applying the batch cap. Both could exhaust the shared IP quota on large
+repositories even with `max_prs: 1`. Updated tooling uses the verified bot token
+and stops when the batch is full. Wait for any authenticated quota reset reported
+by GitHub before retrying. Never switch accounts automatically.
 
 ```sh
 sh scripts/chatgpt-review/prepare-worktrees.sh \

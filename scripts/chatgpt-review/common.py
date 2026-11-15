@@ -1,6 +1,7 @@
-"""Trusted policy and anonymous, read-only GitHub access. Python 3.11+, stdlib only."""
+"""Trusted policy and authenticated, read-only GitHub access. Python 3.11+, stdlib only."""
 
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -11,6 +12,7 @@ from pathlib import Path
 BOT = "openwrt-ai"
 BOT_ID = 276137552
 REVIEWER = "chatgpt-work-v1"
+TOKEN_ENV = "CHATGPT_REVIEW_GITHUB_TOKEN"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]+\Z")
 
@@ -147,24 +149,49 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class GitHub:
-    """GET only; use the runtime's proxy without GitHub tokens, netrc or cookies."""
+    """GET only, with a verified bot user token; no anonymous/account fallback."""
 
-    def __init__(self):
+    def __init__(self, token=None):
+        token = os.environ.get(TOKEN_ENV) if token is None else token
+        require(
+            isinstance(token, str)
+            and token
+            and all(33 <= ord(c) <= 126 for c in token),
+            f"set {TOKEN_ENV} through protected runtime secrets to an openwrt-ai read token",
+        )
+        self._token = token
+        self._identity = None
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler(), NoRedirect()
         )
 
     def get(self, path):
         require(
-            path.startswith("/repos/") and not any(char in path for char in "\r\n#"),
+            (path == "/user" or path.startswith("/repos/"))
+            and not any(char in path for char in "\r\n#"),
             "invalid GitHub API path",
         )
+        if self._identity is None:
+            identity = self._request("/user")
+            require(
+                isinstance(identity, dict)
+                and identity.get("login") == BOT
+                and identity.get("id") == BOT_ID,
+                "GitHub token must authenticate as openwrt-ai; refusing repository reads",
+            )
+            self._identity = {"login": BOT, "id": BOT_ID}
+        if path == "/user":
+            return dict(self._identity)
+        return self._request(path)
+
+    def _request(self, path):
         request = urllib.request.Request(
             "https://api.github.com" + path,
             headers={
                 "Accept": "application/vnd.github+json",
                 "User-Agent": REVIEWER,
                 "X-GitHub-Api-Version": "2022-11-28",
+                "Authorization": f"Bearer {self._token}",
             },
             method="GET",
         )
@@ -173,12 +200,14 @@ class GitHub:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             reset = error.headers.get("X-RateLimit-Reset", "unknown")
+            error.close()
             raise GitHubError(
                 f"GitHub GET {path}: HTTP {error.code}; "
                 f"rate limit reset (Unix seconds): {reset}"
             ) from error
         except urllib.error.URLError as error:
-            raise GitHubError(f"GitHub GET failed: {error.reason}") from error
+            reason = str(error.reason).replace(self._token, "[REDACTED]")
+            raise GitHubError(f"GitHub GET failed: {reason}") from error
 
     def pages(self, path, parameters=None):
         require("?" not in path, "pagination path must not include query parameters")

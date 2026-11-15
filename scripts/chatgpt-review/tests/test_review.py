@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import json
 import sys
 import unittest
 import urllib.request
@@ -322,20 +323,95 @@ class DiscoveryTests(unittest.TestCase):
         with self.assertRaises(ReviewError):
             policy(access_token="never accept credentials")
 
-    def test_anonymous_client_does_not_send_authorization(self):
-        api = GitHub()
-        response = mock.MagicMock()
-        response.__enter__.return_value.read.return_value = b'{"private":false}'
-        with mock.patch.object(api.opener, "open", return_value=response) as opening:
-            api.get(f"/repos/{REPOSITORY}")
-        request = opening.call_args.args[0]
-        self.assertEqual(request.get_method(), "GET")
-        self.assertNotIn("Authorization", request.headers)
+    def test_authenticated_client_verifies_bot_once_before_repository_reads(self):
+        api = GitHub(token="fixture_token")
 
-    def test_anonymous_client_keeps_runtime_https_proxy(self):
+        def response(value):
+            result = mock.MagicMock()
+            result.__enter__.return_value.read.return_value = json.dumps(value).encode()
+            return result
+
+        with mock.patch.object(
+            api.opener,
+            "open",
+            side_effect=[
+                response({"login": BOT, "id": BOT_ID}),
+                response({"private": False}),
+                response({"private": False}),
+            ],
+        ) as opening:
+            api.get(f"/repos/{REPOSITORY}")
+            api.get(f"/repos/{REPOSITORY}")
+        requests = [call.args[0] for call in opening.call_args_list]
+        self.assertEqual(
+            [request.full_url for request in requests],
+            [
+                "https://api.github.com/user",
+                *[f"https://api.github.com/repos/{REPOSITORY}"] * 2,
+            ],
+        )
+        for request in requests:
+            self.assertEqual(request.get_method(), "GET")
+            self.assertEqual(request.headers["Authorization"], "Bearer fixture_token")
+
+    def test_missing_token_never_uses_ambient_personal_credentials(self):
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {"GH_TOKEN": "personal", "GITHUB_TOKEN": "personal"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ReviewError, "CHATGPT_REVIEW_GITHUB_TOKEN"),
+        ):
+            GitHub()
+
+    def test_token_is_read_from_dedicated_runtime_secret(self):
+        with mock.patch.dict(
+            "os.environ", {"CHATGPT_REVIEW_GITHUB_TOKEN": "fixture_token"}, clear=True
+        ):
+            api = GitHub()
+        self.assertEqual(api._token, "fixture_token")
+
+    def test_wrong_token_identity_blocks_repository_request(self):
+        for identity in ({"login": "hauke", "id": 78494}, {"login": BOT, "id": 1}):
+            api = GitHub(token="fixture_token")
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = json.dumps(
+                identity
+            ).encode()
+            with (
+                mock.patch.object(api.opener, "open", return_value=response) as opening,
+                self.assertRaisesRegex(ReviewError, "refusing repository reads"),
+            ):
+                api.get(f"/repos/{REPOSITORY}")
+            self.assertEqual(opening.call_count, 1)
+
+    def test_expired_token_has_no_anonymous_fallback(self):
+        api = GitHub(token="fixture_token")
+        failure = urllib.error.HTTPError(
+            "https://api.github.com/user", 401, "Unauthorized", {}, None
+        )
+        with (
+            mock.patch.object(api.opener, "open", side_effect=failure) as opening,
+            self.assertRaisesRegex(GitHubError, "HTTP 401"),
+        ):
+            api.get(f"/repos/{REPOSITORY}")
+        self.assertEqual(opening.call_count, 1)
+
+    def test_token_never_appears_in_transport_errors(self):
+        api = GitHub(token="fixture_token")
+        failure = urllib.error.URLError("rejected fixture_token")
+        with (
+            mock.patch.object(api.opener, "open", side_effect=failure),
+            self.assertRaises(GitHubError) as caught,
+        ):
+            api.get(f"/repos/{REPOSITORY}")
+        self.assertNotIn("fixture_token", str(caught.exception))
+
+    def test_authenticated_client_keeps_runtime_https_proxy(self):
         proxies = {"https": "http://managed-proxy.invalid:3128"}
         with mock.patch("urllib.request.getproxies", return_value=proxies):
-            api = GitHub()
+            api = GitHub(token="fixture_token")
         handlers = [
             handler
             for handler in api.opener.handlers
@@ -344,9 +420,9 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(handlers), 1)
         self.assertEqual(handlers[0].proxies, proxies)
 
-    def test_anonymous_client_works_without_proxy_configuration(self):
+    def test_authenticated_client_works_without_proxy_configuration(self):
         with mock.patch("urllib.request.getproxies", return_value={}):
-            api = GitHub()
+            api = GitHub(token="fixture_token")
         self.assertFalse(
             any(
                 isinstance(handler, urllib.request.ProxyHandler)
