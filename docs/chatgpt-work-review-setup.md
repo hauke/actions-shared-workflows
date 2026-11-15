@@ -17,11 +17,12 @@ and reduce the batch when necessary.
 The scripts need Python 3.11+, Git, a POSIX shell, disk space, and HTTPS access
 to `api.github.com`, `github.com`, and explicitly configured public reference
 hosts. They use the Python standard library only. Discovery and validation
-require an `openwrt-ai` user token in the protected runtime environment variable
+use either fresh `openwrt-ai` connector observations (`--github-snapshot`) or a
+user token in the protected runtime environment variable
 `CHATGPT_REVIEW_GITHUB_TOKEN`. There is no anonymous API fallback. Git source
 fetches remain anonymous and never receive that token.
 
-The API client verifies the token using `GET /user` before any repository reads,
+In token mode, the API client verifies the token using `GET /user` before any repository reads,
 requiring login `openwrt-ai` and numeric ID `276137552`. It caches that verification
 for the current client invocation. Missing/invalid tokens and other identities
 are failures, not reasons to retry anonymously or use `hauke`.
@@ -83,7 +84,7 @@ Availability, approval behavior, model limits, and UI labels may vary by surface
    to another account. Removing/reconnecting accounts can change tool parameters;
    use the actual tool schema, not a stale saved connection ID.
 3. Keep connector credentials in its protected authorization mechanism. For the
-   scripts, create a separate user token while signed in to GitHub as `openwrt-ai`,
+   scripts in token mode, create a separate user token while signed in to GitHub as `openwrt-ai`,
    and inject it as the protected runtime secret `CHATGPT_REVIEW_GITHUB_TOKEN`.
    Prefer a fine-grained token with public-repository read access and no write
    permissions. Verify access to each intended public endpoint; do not grant
@@ -97,12 +98,94 @@ Availability, approval behavior, model limits, and UI labels may vary by surface
 Configure the named secret through the execution environment's supported secret
 mechanism, or a trusted local secret manager, before launching the scripts. Do
 not assume a personal Work web task offers arbitrary environment-secret injection.
-If that runtime cannot provide this secret securely, use a supported local/cloud
-runtime that can. The GitHub connector's OAuth token is not extracted by these
+If that runtime cannot provide this secret securely, use connector-observation
+mode below. The GitHub connector's OAuth token is not extracted by these
 scripts: being connected in ChatGPT does not populate the environment variable.
 Model-driven PR/discussion/CI reads should use the verified bot connector.
-A connector-only replacement for the scripts' HTTP transport would need an
-adapter; this implementation provides the authenticated user-token path.
+The snapshot adapter lets scripts consume these connector reads without making
+HTTP calls or needing any token. It supports dry-run previews only.
+
+## Connector mode in ChatGPT Work (no additional secret)
+
+If the connector already verifies as `openwrt-ai`, use this mode in a Work runtime
+without environment-secret injection. Work performs the authenticated tool reads,
+normalizes the results to a local JSON snapshot, and the scripts consume that
+snapshot. There is no local HTTP request or token extraction in this mode.
+
+Capture format:
+
+```json
+{
+  "version": 1,
+  "source": "connector-snapshot",
+  "observed_at": "2026-11-15T12:00:00+00:00",
+  "identity": {"login": "openwrt-ai", "id": 276137552},
+  "resources": {
+    "/repos/openwrt/openwrt": {
+      "complete": true,
+      "data": {"full_name": "openwrt/openwrt", "private": false, "visibility": "public"}
+    }
+  }
+}
+```
+
+This illustrates the schema, not actual fresh observations. Replace the time
+and populate every required resource from real connector read results. Paths
+are canonical GitHub REST-style resource identifiers with no query string. Each
+collection contains the combined results across all pages, rather than a single
+page. The adapter does not call REST for missing resources. Normalize fields as
+follows (do not infer missing values):
+
+| Resource | Data required |
+| --- | --- |
+| `/repos/OWNER/REPO` | `full_name`, `private: false`, public `visibility` |
+| `/repos/OWNER/REPO/pulls/N` | `number`, `state`, `merged_at`, `updated_at`, `head.sha`, `head.repo.full_name/private`, `base.sha/ref/repo.full_name/private`, `changed_files`, `commits` |
+| `/repos/OWNER/REPO/pulls/N/reviews` | Array of reviews with numeric `id`, `user.login/id`, `commit_id`, REST-style `state` (`COMMENTED`, `PENDING`, etc.), `submitted_at`, `body` |
+| `/repos/OWNER/REPO/pulls/N/files` | Array of `filename` and full textual `patch` for each changed file; no fabricated patches for binary/unavailable files |
+| `/repos/OWNER/REPO/pulls/N/commits` | Array with each commit's `sha`, if commit-message findings require membership validation |
+| `/repos/OWNER/REPO/pulls/N/comments` | Complete array of inline comments with `id`, `user.login/id`, `pull_request_review_id`, `in_reply_to_id` where present, if replies are proposed |
+| `/repos/OWNER/REPO/pulls` | Optional candidate PR array with the PR fields above, for batches; it may be partial |
+
+Tool responses use different field names; Work must preserve the actual values
+when mapping them. For example, a review's `author` becomes `user`, `commit.oid`
+becomes `commit_id`, and GraphQL `databaseId` is the numeric REST `id`. Never use
+a GraphQL node string as a numeric ID. Mark `complete: true` only when all data
+for that resource has been retrieved and the tool's pagination/completeness is
+known. Mark truncated/unavailable collections false; required incomplete records
+fail validation. Only the optional candidate listing may be partial. Its
+remaining count is reported as unknown, even if all supplied candidates were read.
+
+For one PR, collect repository metadata, PR metadata and complete reviews into
+`discovery-github.json`, then run:
+
+```sh
+python3 -E -s scripts/chatgpt-review/discover.py \
+  --config /path/to/policy.json --repository openwrt/openwrt --pr 14895 \
+  --github-snapshot /path/to/discovery-github.json
+```
+
+Preparation uses that manifest normally and still fetches source through anonymous
+HTTPS Git. After analysis, perform NEW connector reads of the current repository,
+PR metadata, reviews, all changed-file patches, and any needed commits/replies.
+Recheck the authenticated identity and write `validation-github.json` and the
+usual identity observation file. Append
+`--github-snapshot /path/to/validation-github.json` to the normal validation command.
+
+Snapshots expire after five minutes; a validation capture must be newer than
+the discovery manifest. Refresh the connector reads if either condition fails.
+Record only public, allowlisted resources and keep observations outside PR
+worktrees. Missing fields, stale captures, changed SHAs, or incomplete collections
+must be reported, not filled from memory or changed to make validation pass.
+
+This mode trusts the captured connector evidence, just as the existing identity
+file trusts the recorded tool observation. It cannot cryptographically prove
+who captured JSON or detect a change after capture. Previews explicitly include
+`github_read_source: connector-snapshot` and `live_revalidation: false`, with
+`publishing_enabled: false`. It is for the dry run; a future publisher must perform
+its own live authenticated identity, head/base, diff and thread checks. Do not
+treat repeated reads from one snapshot as independent live GitHub checks.
+
+## Publishing boundary
 
 The scripts enforce their own allowlist, bot-token identity, GET-only access, and validation. They
 cannot restrict what the Work model can do through another enabled tool. Prompt
@@ -259,7 +342,7 @@ python3 -E -s scripts/chatgpt-review/validate-review.py \
 
 Add `--threads "$review_run/threads-1.json"` only when proposing replies. The
 validator checks policy, bot identity observation, snapshot, open/public state,
-head and base freshness before and after reads, full file pagination, LEFT/RIGHT
+head and base against current REST reads or the fresh connector capture, full file pagination, LEFT/RIGHT
 line locations, same-hunk ranges, action, sizes/counts, duplicate payload entries,
 commit membership, and eligible prior ChatGPT threads. Missing/truncated textual
 patches are rejected for inline anchors. GitHub's 3,000-file listing limit is

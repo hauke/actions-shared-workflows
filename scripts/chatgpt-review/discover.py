@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 
 from common import (
     REVIEWER,
-    GitHub,
     GitHubError,
     Policy,
     ReviewError,
@@ -19,6 +18,7 @@ from common import (
     run_cli,
     snapshot,
 )
+from connector import client_argument, github_client
 
 
 def discover(api, policy, maximum=None, repository=None, number=None):
@@ -101,7 +101,7 @@ def discover(api, policy, maximum=None, repository=None, number=None):
                     }
                 )
         else:
-            scan_complete = True
+            scan_complete = number is not None or getattr(api, "listing_complete", True)
     except ReviewError as error:
         failures.append(
             {
@@ -121,12 +121,14 @@ def discover(api, policy, maximum=None, repository=None, number=None):
         "deferred": 0 if scan_complete and not failures else None,
         "skipped": skipped,
         "failed": failures,
+        "github_read_source": api.source,
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     config_argument(parser)
+    client_argument(parser)
     parser.add_argument("--max-prs", type=int)
     parser.add_argument(
         "--repository", help="allowlisted repository for a specific-PR dry run"
@@ -135,8 +137,9 @@ def main():
         "--pr", type=int, help="review this PR without scanning open PRs"
     )
     args = parser.parse_args()
+    policy = Policy.load(args.config)
     result = discover(
-        GitHub(), Policy.load(args.config), args.max_prs, args.repository, args.pr
+        github_client(args, policy), policy, args.max_prs, args.repository, args.pr
     )
     emit(result)
     if result["failed"]:

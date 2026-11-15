@@ -151,6 +151,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class GitHub:
     """GET only, with a verified bot user token; no anonymous/account fallback."""
 
+    source = "authenticated-rest"
+
     def __init__(self, token=None):
         token = os.environ.get(TOKEN_ENV) if token is None else token
         require(

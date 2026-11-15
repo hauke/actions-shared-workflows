@@ -12,7 +12,6 @@ from common import (
     BOT,
     BOT_ID,
     REVIEWER,
-    GitHub,
     Policy,
     commit_sha,
     config_argument,
@@ -25,6 +24,7 @@ from common import (
     run_cli,
     snapshot,
 )
+from connector import client_argument, github_client
 
 HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:.*)\Z")
 
@@ -239,6 +239,11 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         and manifest.get("mode") == "dry-run",
         "invalid discovery manifest",
     )
+    if api.source == "connector-snapshot":
+        require(
+            api.observed_at > datetime.fromisoformat(manifest["generated_at"]),
+            "capture new connector observations after discovery for validation",
+        )
     expected = [
         item
         for item in manifest["prs"]
@@ -358,6 +363,8 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         "version": 1,
         "mode": "dry-run",
         "publishing_enabled": False,
+        "github_read_source": api.source,
+        "live_revalidation": api.source == "authenticated-rest",
         "validated_at": now.isoformat(),
         "identity_from_connector_evidence": BOT,
         "expected_base_sha": base,
@@ -370,6 +377,7 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     config_argument(parser)
+    client_argument(parser)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument(
         "--identity",
@@ -382,12 +390,13 @@ def main():
     )
     parser.add_argument("findings", type=Path)
     args = parser.parse_args()
+    policy = Policy.load(args.config)
     emit(
         validate(
             read_json(args.findings),
             read_json(args.manifest),
-            Policy.load(args.config),
-            GitHub(),
+            policy,
+            github_client(args, policy),
             read_json(args.identity),
             read_json(args.threads) if args.threads else None,
         )

@@ -11,16 +11,18 @@ commit, never a PR head. The implementation currently supports **dry-run only**.
 Review public PRs in the policy's repository allowlist. Use the existing ChatGPT
 subscription; do not call OpenAI APIs, obtain API keys, scrape session credentials,
 or launch another model from a shell script. Use the verified `openwrt-ai` GitHub
-connector for PR/discussion/CI reads. Discovery and validation scripts require
-the bot user token injected securely as `CHATGPT_REVIEW_GITHUB_TOKEN`; they verify
-its identity before repository GETs and never fall back to anonymous API reads.
+connector for PR/discussion/CI reads. For scripts, prefer connector-observation
+mode (`--github-snapshot`) when no protected bot token is available. Follow the
+snapshot schema and capture procedure in the setup guide. Alternatively supply
+`CHATGPT_REVIEW_GITHUB_TOKEN` through protected runtime secrets; the REST client
+verifies its identity before repository GETs. Never use anonymous API reads.
 Keep Git source fetches anonymous. Do not use unrelated
 plugins, private repositories, signed-in browsers, or ambient GitHub CLI credentials.
 
 Check only whether the named secret is available; never print it, request it in
 chat, put it in command-line arguments/files, or extract it from the connector.
-If the execution runtime cannot supply it securely, report the missing runtime
-configuration and stop. A GitHub connector connection alone does not provide
+If the execution runtime cannot supply it securely, use fresh observations from
+the authenticated connector instead. A connector connection does not provide
 a token to Python scripts. Never substitute `GH_TOKEN`, `GITHUB_TOKEN`, or a
 different account. The token is not passed into Git subprocesses or PR code.
 
@@ -43,6 +45,13 @@ access. A directory or worktree separates files; it does not establish separate
 model contexts or an OS sandbox. Do not claim isolation that has not been tested.
 
 ## Discover and prepare
+
+In connector mode, first verify the authenticated account and collect the public
+repository metadata, selected open PR snapshots, and their complete review
+histories. Save normalized connector observations to `discovery-github.json` as
+described in the setup guide. Pass `--github-snapshot <discovery-github.json>`
+to discovery. Do not invent data or completeness; report missing/truncated tool
+responses. A candidate list can be partial, and remaining work stays unknown.
 
 1. Run `scripts/chatgpt-review/discover.py --config <policy>` from the trusted
    checkout using `python3 -E -s`. Save stdout as `discovery.json` in the output
@@ -161,6 +170,15 @@ separate `fixed, thanks` reply preview, never resolves a thread or posts anythin
    --identity <identity.json> [--threads <threads.json>] <findings.json>` using
    `python3 -E -s`, saving stdout per PR. Any nonzero exit means validation failed.
    Never hand-edit a validated preview to bypass a failure.
+   In connector mode, re-read repository/PR metadata, head/base SHAs, reviews,
+   changed-file patches, and any required commit/reply data immediately before
+   validation. Save a NEW capture as `validation-github.json`, and append
+   `--github-snapshot <validation-github.json>` to the validation command. Do not
+   reuse the discovery capture. Records must contain complete actual connector
+   results and be at most five minutes old. Copy the new authenticated identity
+   observation to the identity file as usual. Snapshot-based previews must be
+   identified as `live_revalidation: false`; they are never proof of live API
+   revalidation or authorization to publish.
 4. Stop after creating the previews. Validation rechecks public PR state, head,
    base, diff anchors, existing completion markers, and reply eligibility, but
    cannot authorize publication, prove semantic correctness, or prevent a later
