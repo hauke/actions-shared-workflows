@@ -160,3 +160,11 @@ separate `fixed, thanks` reply preview, never resolves a thread or posts anythin
    outside worktrees. Preserve failed PRs for retry. Unpublished clean previews
    remain eligible next run; only actual submitted marked reviews count as
    published completion. Follow the setup guide for manual cleanup of temp data.
+
+For a manually requested specific-PR test, pass the operator-supplied allowlisted
+repository and PR number as `--repository <owner/name> --pr <number>` to discovery.
+This bypasses scanning other open PRs. Normal batch discovery stops when its
+selection is full; `deferred: null` means the unscanned remainder is unknown.
+Report it as unknown, and do not spend additional API quota to count it. On a
+rate-limit response, preserve the failure and reset time and stop; never work
+around it with another account or private token.

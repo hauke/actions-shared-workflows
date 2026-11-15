@@ -19,6 +19,10 @@ class ReviewError(Exception):
     """An expected failure which must never be interpreted as a clean review."""
 
 
+class GitHubError(ReviewError):
+    """A transport/API failure: stop discovery instead of repeating failed reads."""
+
+
 def require(condition, message):
     if not condition:
         raise ReviewError(message)
@@ -169,18 +173,21 @@ class GitHub:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             reset = error.headers.get("X-RateLimit-Reset", "unknown")
-            raise ReviewError(
+            raise GitHubError(
                 f"GitHub GET {path}: HTTP {error.code}; "
                 f"rate limit reset (Unix seconds): {reset}"
             ) from error
         except urllib.error.URLError as error:
-            raise ReviewError(f"GitHub GET failed: {error.reason}") from error
+            raise GitHubError(f"GitHub GET failed: {error.reason}") from error
 
-    def pages(self, path):
+    def pages(self, path, parameters=None):
         require("?" not in path, "pagination path must not include query parameters")
         page = 1
         while True:
-            data = self.get(f"{path}?per_page=100&page={page}")
+            query = urllib.parse.urlencode(
+                {**(parameters or {}), "per_page": 100, "page": page}
+            )
+            data = self.get(f"{path}?{query}")
             require(isinstance(data, list), "GitHub pagination response is not a list")
             yield from data
             if len(data) < 100:

@@ -137,10 +137,35 @@ python3 -E -s scripts/chatgpt-review/discover.py \
 
 Check the exit status and JSON before continuing. A per-PR failure is included
 in `failed` with exit status 1; successfully discovered PRs can still be reviewed
-manually. A repository/listing failure exits without a usable manifest. All PR
-and review pages are scanned. Pending work is selected oldest-update-first to
-reduce starvation across repositories. Only complete, submitted ChatGPT bot
+manually. API/listing failures return a manifest with `failed` and exit status 1,
+then stop further scanning. Pending work is fetched oldest-update-first from
+GitHub and merged across repositories. Discovery stops as soon as the batch is
+full instead of checking every open PR's review history. Review pagination is
+still complete for each inspected PR. Only complete, submitted ChatGPT bot
 reviews count; unchanged heads are skipped. New PRs and changed heads are selected.
+
+For the first dry run, select one known open PR directly (replace `12345` with
+the actual PR number and ensure its repository is in the trusted policy):
+
+```sh
+python3 -E -s scripts/chatgpt-review/discover.py \
+  --config /tmp/review-policy.json \
+  --repository openwrt/openwrt --pr 12345 > "$review_run/discovery.json"
+```
+
+This reads only repository metadata, that PR, and its review history; it never
+lists the repository's other open PRs. Use `--repository` and `--pr` together.
+An ordinary one-PR batch also stops early, but may inspect unchanged PRs first.
+When discovery stops early, `scan_complete` is false and `deferred` is null:
+the remainder is unknown, not zero. Skipped/failed counts cover only inspected
+PRs. Do not enumerate the rest just to calculate a log count.
+
+The older `c81ec17` discovery scanned all reviews before applying the batch cap;
+on large repositories such as OpenWrt this could exhaust the anonymous quota
+even with `max_prs: 1`. Use the updated tooling and wait for the quota reset
+reported by GitHub before retrying. Early stopping reduces requests but does
+not remove rate limits, especially when many unchanged heads must be skipped
+or a PR has a large review history. Never add personal credentials automatically.
 
 ```sh
 sh scripts/chatgpt-review/prepare-worktrees.sh \
