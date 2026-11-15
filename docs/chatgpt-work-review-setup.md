@@ -228,12 +228,103 @@ repositories are optional entries like:
 ```
 
 Only public HTTPS remotes belong in this trusted list. Select kernel tags from
-the trusted base's version files, rather than blindly tracking current Linux.
+version metadata, rather than blindly tracking current Linux.
 Repeat a URL with different refs to make multiple versions available. Reference
 fetches are shallow, use separate detached worktrees, and share one bare clone
 per URL. Source repositories retain full commit history for incremental review.
 Neither submodules nor custom filters are followed. Private/internal reference
 hosts must be excluded using the environment's network policy as well.
+
+## Deeper review using upstream source
+
+For OpenWrt reviews, start the trusted policy from
+`scripts/chatgpt-review/config.openwrt.example.json`. Keep `max_prs` at one for
+the first run. This example maps kernel patches, mac80211, dnsmasq and
+uboot-envtools to their public source repositories. The generic
+`config.example.json` still leaves references empty. An earlier task instruction
+that explicitly sets `reference_repositories: []` must be removed to enable these
+checks. Extend trusted mappings for other packages such as hostap, Dropbear or
+BusyBox using their actual source/version metadata.
+
+A mapping has `url` and either an explicit `ref` or a `ref_from` object. Optional
+`match_paths` is a list of globs matched against changed OpenWrt paths; matching
+entries are selected automatically during preparation. Entries without matchers
+remain manual via `--reference <policy-index>`. Remotes always come from trusted
+policy, never from PR-controlled `PKG_SOURCE_URL` or patch text.
+
+Example version-matched package mapping:
+
+```json
+{
+  "url": "https://thekelleys.org.uk/git/dnsmasq.git",
+  "match_paths": ["package/network/services/dnsmasq/**"],
+  "ref_from": {
+    "file": "package/network/services/dnsmasq/Makefile",
+    "variable": ["PKG_UPSTREAM_VERSION", "PKG_VERSION"],
+    "prefix": "v"
+  }
+}
+```
+
+`ref_from` reads a literal assignment from a regular Git blob at the discovered
+base and PR head. `file` and `variable` may be ordered fallback lists. The first
+existing file is used, then the first unambiguous literal variable. Make functions,
+shell expressions and multi-line expressions are never evaluated. If a version
+changes, both base and proposed versions are fetched. The proposed version is
+data, not executable configuration or permission to change the remote.
+
+For kernels, `{series}` in these fields is replaced only by numeric series found
+in changed `patches-X.Y`, `backport-X.Y`, `pending-X.Y` or `hack-X.Y` paths. The
+example checks both current `target/linux/generic/kernel-X.Y` and older
+`include/kernel-X.Y` layouts, combining `LINUX_VERSION-X.Y` with a `vX.Y` prefix.
+Thus a literal `.24` for series `6.1` selects `v6.1.24`. mac80211 has a separate
+mapping based on its backports package version, not the running target kernel.
+
+Missing/ambiguous versions, tags and failed fetches are recorded in `references`.
+There is no fallback to master. Check these errors even when preparation's PR
+worktree phase succeeds. Review manually configured naming when a project's tags
+do not correspond directly to the package version. Kernel context is not a
+substitute for inspecting backports/OpenWrt compatibility code and patch ordering.
+
+Each successful prepared reference reports `url`, `ref`, pinned `sha`, `clone`,
+`worktree`, `policy_indices` and `for_prs`. Bindings identify the OpenWrt PR,
+base/head metadata revision and SHA. Identical URL/ref requests share a checkout;
+multiple versions of a repository share one bare clone. Only selected snapshots
+are fetched shallowly; a large Linux history is not cloned for reference use.
+
+Collect full source context and cross-site search results for a prepared reference:
+
+```sh
+python3 -E -s scripts/chatgpt-review/inspect-reference.py \
+  /path/to/prepared.json --repository openwrt/openwrt --pr 14895 --reference 0
+```
+
+Here `0` indexes **prepared references**, not the policy. Run only for successful
+references assigned to this PR. The helper reads changed `.patch` files through
+Git blobs, extracts upstream paths and changed function-call names, saves whole
+upstream files as text, and searches the pinned source tree for related sites.
+It records which matched files are outside the patch. Output is under the PR's
+trusted `context/upstream-<index>/` directory, outside source worktrees. Repeated
+inspection needs a fresh output directory (the script refuses to overwrite one).
+
+`git apply --check` reports whether the patch fits the raw reference without
+changing it. It does not apply OpenWrt prerequisites, evaluate Makefiles, run
+tests, or compile/execute code. Its failure alone is not a defect: the patch may
+depend on an earlier OpenWrt patch or a different strip convention.
+
+The helper bounds collection to 20 patches/files, 24 function symbols and 500
+search matches, with a 1-million-character per-file limit. It reports truncation,
+missing files and errors. It is a context collector, not a semantic correctness
+checker. The Work prompt requires following callers/callees, shared invariants,
+parallel driver/backend paths, error exits and lifecycle pairs, and checking the
+OpenWrt patch stack before reporting a missed site. Broaden/refine searches when
+the collected context is insufficient. Source grep hits alone are not findings.
+
+Work should save `coverage-<PR>.json` with the examined source SHAs, functions,
+related sites, patch-stack checks and limitations. Keep coverage in artifacts
+and logs; maintainer comments stay concise and cite pinned source evidence.
+These checks improve review context but cannot guarantee finding every missed
+site or replace builds/runtime tests.
 
 ## Manual dry run
 

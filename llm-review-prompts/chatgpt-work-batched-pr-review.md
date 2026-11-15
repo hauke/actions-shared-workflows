@@ -70,12 +70,71 @@ comments owned by `openwrt-ai`; never edit Claude's or another user's comments.
    save stdout as `prepared.json`. Repositories are cloned once and each PR gets
    a detached worktree in the reported private temporary root. Failed or stale
    PR refs must be reported and omitted, not reviewed at some other SHA.
-3. Public reference repositories are opt-in, by index in the trusted policy.
-   If relevant, supply `--reference <index>` to preparation. Select the correct
-   kernel version using trusted base configuration; consult U-Boot, dnsmasq,
-   hostap, or other allowlisted upstreams only when relevant. Do not follow a
-   PR-supplied remote URL. Reference failures are logged; do not invent evidence
-   from a tree that was not fetched.
+3. Use the trusted policy's reference mappings. `match_paths` selects relevant
+   repositories automatically; `ref_from` resolves literal versions from base
+   and proposed package metadata without executing Make. For OpenWrt source
+   reviews, use `config.openwrt.example.json` as the policy starting point rather
+   than an empty reference list, unless the operator explicitly disables this.
+   Manual entries without matchers still need `--reference <policy-index>`.
+   Do not follow PR-supplied remote URLs. Missing versions/tags and fetch failures
+   must be logged; never silently compare with upstream master instead.
+
+## Upstream context and completeness checks
+
+For Linux and application patches, inspect the actual relevant source, beyond
+the patch's visible context. Use the successful references assigned to this PR
+in `prepared.json`; their bindings identify base/proposed metadata and their
+SHAs pin the source used. Match each patch to the correct component/version.
+The running kernel version does not establish the version of mac80211 backports,
+U-Boot, or another independently versioned package. If multiple refs were fetched,
+read the one appropriate to the patch and compare versions when the PR upgrades it.
+
+Run trusted `inspect-reference.py <prepared.json> --repository <repo> --pr <number>
+--reference <prepared-reference-index>` using `python3 -E -s` for each relevant
+successful checkout. This index refers to `prepared.json`, not the policy.
+Read the resulting `context/upstream-<index>/report.json` and full `source-*.txt`
+files. The report extracts upstream paths and changed function-call names,
+searches the pinned source tree for related uses, and distinguishes files named
+by the patch from other matched files. Search hits are investigation leads,
+not automatic findings. The script never executes source or applies a patch.
+
+Perform these checks for each material behavior change:
+
+1. Read the entire changed function, its declarations and relevant data types,
+   its callers and callees, and existing tests/documentation. Understand the
+   invariant the patch changes before searching for other places needing it.
+2. Check parallel paths: other drivers/backends, alternate callers, error and
+   cleanup exits, allocation/free pairs, queue stop/start and suspend/resume,
+   synchronous/asynchronous paths, lock/unlock pairs, initialization/teardown,
+   and architecture/configuration variants. A function-signature or contract
+   change needs all consumers checked, including uses outside the changed file.
+   Look for an old helper, constant, field, validation rule, or locking pattern
+   left behind where the same invariant applies. Refine searches for constants,
+   structs and macros as needed; the helper's function-name search is a starting
+   point, not a substitute for this analysis.
+3. Inspect the OpenWrt patch series, compatibility wrappers and package metadata.
+   A pristine upstream checkout does not include OpenWrt/backports patches.
+   Confirm a suspected missing change is not already supplied by another patch
+   or intentionally excluded by the supported version/configuration. Read
+   relevant upstream prerequisite/follow-up fixes and compare all modified hunks
+   of a backported fix, not only its commit subject. Fetch additional public
+   source only through trusted reference mappings or the authenticated connector.
+4. Treat `apply_check` as a static check against the raw reference. Success does
+   not prove runtime correctness. Failure may mean prerequisites, different
+   patch strip conventions or OpenWrt patch ordering; do not report it as a PR
+   defect without investigating. Do not run builds, tests or PR-controlled tools.
+5. When finding a missed site, explain why that site needs the same change and
+   the concrete behavior that fails. Link the pinned source evidence and anchor
+   the finding to the causal PR hunk. An unchanged similar-looking site alone
+   is insufficient evidence. Suppress differences intentional for a different
+   backend/version/configuration.
+
+Save a concise `coverage-<PR>.json` outside worktrees, recording reference
+URL/ref/SHA, functions and related sites examined, OpenWrt patch-stack checks,
+and unresolved version/coverage limitations. Keep it in artifacts and the run
+log, not in maintainer comments. Explicitly report truncated searches/files,
+missing tags, unresolved metadata and unfetched components. Narrow and extend
+searches when needed, and do not claim an exhaustive audit from bounded matches.
 
 ## Review each PR
 
@@ -91,7 +150,7 @@ contexts. Do not carry assumptions or project rules across PRs.
 - Start with `context/review.diff` and `context/commits.txt`. Incremental mode
   covers the previous ChatGPT-reviewed ancestor through the current head.
   Full mode covers the PR merge base through its head, including force-pushes,
-  rebases, missing old commits, and PRs only previously reviewed by Claude.
+  rebases and missing old commits. Claude-covered PRs are excluded before review.
   Inspect individual commits with trusted Git commands, including message-only
   rewrites even when the final file tree did not change.
 - Consult `context/pr.diff` for valid inline anchors: the incremental diff and
@@ -109,7 +168,8 @@ contexts. Do not carry assumptions or project rules across PRs.
   device names/specifications across files, discrepancies with commit messages,
   introduce-then-fix series mistakes, and evidenced sister-device parity gaps.
 - Check every relevant commit's subject, scope, and explanation against its
-  actual changes. Commit-message findings are the only visible review-body text.
+  actual changes. Preserve concise commit-message findings and the checked SHA;
+  when extending an existing review, keep new source findings in that same body.
 - For backports (release branch, `[X.Y]` title, or cherry-pick trailer), verify
   the upstream commit and prerequisites using public trusted refs. Flag missing
   or wrong `cherry picked from` trailers and backport-introduced deviations.

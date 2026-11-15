@@ -2,11 +2,14 @@
 """Prepare anonymous Git snapshots and per-PR worktrees in a private temp directory."""
 
 import argparse
+import fnmatch
 import hashlib
 import os
 import pwd
+import re
 import subprocess
 import tempfile
+from itertools import product
 from pathlib import Path
 
 from common import (
@@ -176,7 +179,7 @@ def regular_blob(git, clone, sha, path):
         return ""
     require(
         entry.startswith(("100644 blob ", "100755 blob ")),
-        "trusted review rules must be a regular file",
+        "requested Git blob must be a regular file",
     )
     return git.run("show", f"{sha}:{path}", cwd=clone).stdout
 
@@ -255,6 +258,18 @@ def prepare_one(git, clone, root, item):
         "log", "--format=fuller", "--reverse", f"{start}..{head}", "--", cwd=clone
     ).stdout
     (context / "commits.txt").write_text(commits, encoding="utf-8")
+    changed_paths = git.run(
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "--name-only",
+        "-z",
+        start,
+        head,
+        "--",
+        cwd=clone,
+    ).stdout.split("\0")
     return {
         **item,
         "clone": str(clone),
@@ -264,7 +279,107 @@ def prepare_one(git, clone, root, item):
         "review_start": start,
         "merge_base": merge_base,
         "reason": reason,
+        "changed_paths": [path for path in changed_paths if path],
     }
+
+
+def reference_ref(git, item, reference, revision, series=""):
+    if "ref" in reference:
+        return reference["ref"]
+    source = reference["ref_from"]
+    files = source["file"] if isinstance(source["file"], list) else [source["file"]]
+    text = ""
+    for path in files:
+        text = regular_blob(
+            git,
+            item["clone"],
+            item[revision + "_sha"],
+            path.replace("{series}", series),
+        )
+        if text:
+            break
+    variables = (
+        source["variable"]
+        if isinstance(source["variable"], list)
+        else [source["variable"]]
+    )
+    for variable in variables:
+        variable = variable.replace("{series}", series)
+        pattern = rf"^\s*{re.escape(variable)}\s*:?=\s*([^#\n]+)"
+        values = re.findall(pattern, text, re.MULTILINE)
+        require(len(values) <= 1, "ambiguous version variable")
+        if values and re.fullmatch(r"[A-Za-z0-9._+-]{1,128}", values[0].strip()):
+            return source["prefix"].replace("{series}", series) + values[0].strip()
+    raise ReviewError(
+        f"cannot resolve literal {source['variable']} at {revision}; do not evaluate Make syntax"
+    )
+
+
+def reference_requests(git, prepared, policy, explicit):
+    requests, errors = {}, []
+    for index, reference in enumerate(policy.references):
+        for item in prepared:
+            if index not in explicit and not any(
+                fnmatch.fnmatchcase(path, pattern)
+                for path in item["changed_paths"]
+                for pattern in reference.get("match_paths", [])
+            ):
+                continue
+            series_values = [""]
+            if "{series}" in str(reference.get("ref_from", {})):
+                series_values = sorted(
+                    set(
+                        re.findall(
+                            r"/(?:patches-|backport-|pending-|hack-)([0-9]+\.[0-9]+)/",
+                            "\n".join(item["changed_paths"]),
+                        )
+                    )
+                )
+                if not series_values:
+                    errors.append(
+                        {
+                            "url": reference["url"],
+                            "policy_index": index,
+                            "error": "cannot infer kernel series from changed patch paths",
+                        }
+                    )
+            revisions = ("base", "head") if "ref_from" in reference else ("base",)
+            for revision, series in product(revisions, series_values):
+                binding = {
+                    "repository": item["repository"],
+                    "number": item["number"],
+                    "revision": revision,
+                    "metadata_sha": item[revision + "_sha"],
+                }
+                try:
+                    ref = reference_ref(git, item, reference, revision, series)
+                    require(
+                        not ref.startswith("-"),
+                        "resolved reference must not be a Git option",
+                    )
+                    key = (reference["url"], ref)
+                    entry = requests.setdefault(
+                        key,
+                        {
+                            "url": reference["url"],
+                            "ref": ref,
+                            "policy_indices": [],
+                            "for_prs": [],
+                        },
+                    )
+                    if index not in entry["policy_indices"]:
+                        entry["policy_indices"].append(index)
+                    entry["for_prs"].append(binding)
+                except ReviewError as error:
+                    errors.append(
+                        {
+                            "url": reference["url"],
+                            "policy_index": index,
+                            "for_prs": [binding],
+                            "error": str(error),
+                        }
+                    )
+    return list(requests.values()), errors
 
 
 def prepare(manifest, policy, git=None, temp_parent=None, reference_indices=()):
@@ -320,9 +435,12 @@ def prepare(manifest, policy, git=None, temp_parent=None, reference_indices=()):
             prepared.append(prepare_one(git, clones[repository], root, item))
         except (ReviewError, OSError) as error:
             failures.append({**item, "error": str(error)})
+    requested, reference_errors = reference_requests(
+        git, prepared, policy, reference_indices
+    )
+    references.extend(reference_errors)
     reference_clones = {}
-    for index in dict.fromkeys(reference_indices):
-        reference = policy.references[index]
+    for reference in requested:
         key = hashlib.sha256(
             (reference["url"] + "\n" + reference["ref"]).encode()
         ).hexdigest()[:16]
@@ -350,7 +468,14 @@ def prepare(manifest, policy, git=None, temp_parent=None, reference_indices=()):
             sha = commit_sha(git.value("rev-parse", "FETCH_HEAD^{commit}", cwd=clone))
             worktree.parent.mkdir(exist_ok=True)
             git.run("worktree", "add", "--detach", str(worktree), sha, cwd=clone)
-            references.append({**reference, "sha": sha, "worktree": str(worktree)})
+            references.append(
+                {
+                    **reference,
+                    "sha": sha,
+                    "clone": str(clone),
+                    "worktree": str(worktree),
+                }
+            )
         except (ReviewError, OSError) as error:
             references.append({**reference, "error": str(error)})
     return {

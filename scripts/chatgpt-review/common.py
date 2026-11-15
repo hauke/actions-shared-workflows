@@ -109,8 +109,11 @@ class Policy:
         )
         for reference in self.references:
             require(
-                isinstance(reference, dict) and set(reference) == {"url", "ref"},
-                "reference requires exactly url and ref",
+                isinstance(reference, dict)
+                and "url" in reference
+                and not reference.keys() - {"url", "ref", "ref_from", "match_paths"}
+                and (("ref" in reference) != ("ref_from" in reference)),
+                "reference requires url and exactly one of ref or ref_from",
             )
             parsed = urllib.parse.urlsplit(reference["url"])
             require(
@@ -123,12 +126,69 @@ class Policy:
                 and parsed.port in (None, 443),
                 "reference must use public HTTPS",
             )
+            if "ref" in reference:
+                require(
+                    isinstance(reference["ref"], str)
+                    and reference["ref"]
+                    and not reference["ref"].startswith("-")
+                    and not any(ord(char) < 33 for char in reference["ref"]),
+                    "invalid reference ref",
+                )
+            else:
+                source = reference["ref_from"]
+                require(
+                    isinstance(source, dict)
+                    and set(source) == {"file", "variable", "prefix"},
+                    "ref_from requires file, variable and prefix",
+                )
+                files = (
+                    source["file"]
+                    if isinstance(source["file"], list)
+                    else [source["file"]]
+                )
+                require(files, "version metadata files must not be empty")
+                for path in files:
+                    safe_source_path(
+                        path.replace("{series}", "6.1")
+                        if isinstance(path, str)
+                        else path
+                    )
+                variables = (
+                    source["variable"]
+                    if isinstance(source["variable"], list)
+                    else [source["variable"]]
+                )
+                require(
+                    variables
+                    and all(
+                        isinstance(variable, str)
+                        and re.fullmatch(
+                            r"[A-Za-z_][A-Za-z0-9_.-]*",
+                            variable.replace("{series}", "6.1"),
+                        )
+                        for variable in variables
+                    ),
+                    "invalid version variable",
+                )
+                require(
+                    isinstance(source["prefix"], str)
+                    and re.fullmatch(
+                        r"[A-Za-z0-9._/-]*", source["prefix"].replace("{series}", "6.1")
+                    ),
+                    "invalid ref prefix",
+                )
+            patterns = reference.get("match_paths", [])
             require(
-                isinstance(reference["ref"], str)
-                and reference["ref"]
-                and not reference["ref"].startswith("-")
-                and not any(ord(char) < 33 for char in reference["ref"]),
-                "invalid reference ref",
+                isinstance(patterns, list)
+                and all(
+                    isinstance(pattern, str)
+                    and pattern
+                    and not pattern.startswith("/")
+                    and ".." not in pattern.split("/")
+                    and not any(ord(char) < 32 for char in pattern)
+                    for pattern in patterns
+                ),
+                "match_paths must contain relative path globs",
             )
 
     @classmethod
@@ -241,6 +301,19 @@ class GitHub:
 
 def marker(sha):
     return f"<!-- {REVIEWER}:complete:{commit_sha(sha)} -->"
+
+
+def safe_source_path(path):
+    require(
+        isinstance(path, str)
+        and path
+        and not path.startswith("/")
+        and not any(part in ("", ".", "..", ".git") for part in path.split("/"))
+        and "\\" not in path
+        and not any(ord(char) < 32 for char in path),
+        "invalid upstream source path",
+    )
+    return path
 
 
 def completion_sha(body):
