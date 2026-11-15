@@ -143,7 +143,8 @@ follows (do not infer missing values):
 | `/repos/OWNER/REPO/pulls/N/reviews` | Array of reviews with numeric `id`, `user.login/id`, `commit_id`, REST-style `state` (`COMMENTED`, `PENDING`, etc.), `submitted_at`, `body` |
 | `/repos/OWNER/REPO/pulls/N/files` | Array of `filename` and full textual `patch` for each changed file; no fabricated patches for binary/unavailable files |
 | `/repos/OWNER/REPO/pulls/N/commits` | Array with each commit's `sha`, if commit-message findings require membership validation |
-| `/repos/OWNER/REPO/pulls/N/comments` | Complete array of inline comments with `id`, `user.login/id`, `pull_request_review_id`, `in_reply_to_id` where present, if replies are proposed |
+| `/repos/OWNER/REPO/pulls/N/comments` | Complete inline comments with `id`, `body`, `user.login/id`, `pull_request_review_id`, `in_reply_to_id` where present; required for Claude detection |
+| `/repos/OWNER/REPO/issues/N/comments` | Complete top-level conversation comments with numeric `id`, `body`, `user.login/id`, `created_at`, `updated_at`; required for exclusions and updates |
 | `/repos/OWNER/REPO/pulls` | Optional candidate PR array with the PR fields above, for batches; it may be partial |
 
 Tool responses use different field names; Work must preserve the actual values
@@ -155,7 +156,8 @@ known. Mark truncated/unavailable collections false; required incomplete records
 fail validation. Only the optional candidate listing may be partial. Its
 remaining count is reported as unknown, even if all supplied candidates were read.
 
-For one PR, collect repository metadata, PR metadata and complete reviews into
+For one PR, collect repository metadata, PR metadata, complete reviews,
+conversation comments and inline comments into
 `discovery-github.json`, then run:
 
 ```sh
@@ -166,7 +168,8 @@ python3 -E -s scripts/chatgpt-review/discover.py \
 
 Preparation uses that manifest normally and still fetches source through anonymous
 HTTPS Git. After analysis, perform NEW connector reads of the current repository,
-PR metadata, reviews, all changed-file patches, and any needed commits/replies.
+PR metadata, reviews, conversation and inline comments, all changed-file patches,
+and any needed commits.
 Recheck the authenticated identity and write `validation-github.json` and the
 usual identity observation file. Append
 `--github-snapshot /path/to/validation-github.json` to the normal validation command.
@@ -250,8 +253,10 @@ manually. API/listing failures return a manifest with `failed` and exit status 1
 then stop further scanning. Pending work is fetched oldest-update-first from
 GitHub and merged across repositories. Discovery stops as soon as the batch is
 full instead of checking every open PR's review history. Review pagination is
-still complete for each inspected PR. Only complete, submitted ChatGPT bot
-reviews count; unchanged heads are skipped. New PRs and changed heads are selected.
+still complete for each inspected PR. Complete submitted ChatGPT reviews or marked
+conversation comments count as checkpoints; unchanged heads are skipped. PRs
+already commented on by Claude are skipped entirely, even after head changes.
+Other new/changed heads are selected.
 
 For the first dry run, select one known open PR directly (replace `12345` with
 the actual PR number and ensure its repository is in the trusted policy):
@@ -358,12 +363,39 @@ mechanism, and a preview can become stale before someone submits it.
 
 ## Completion and retries
 
-A future/manual authorized `COMMENT` review must use the exact analyzed
-`commit_id` and the generated body. A hidden body marker of the form
-`<!-- chatgpt-work-v1:complete:<40-character SHA> -->` records successful completion,
-including reviews with no findings. Discovery requires both the fixed bot
-login/numeric identity and this exact marker on a submitted `COMMENTED` review.
-Old Claude reviews, pending reviews, and dismissed reviews do not count.
+A first future/manual authorized `COMMENT` review uses the exact analyzed
+`commit_id`, line-anchored findings, and generated body. Every section contains
+the full visible `Reviewed commit: <SHA>` and a hidden marker of the form
+`<!-- chatgpt-work-v1:complete:<40-character SHA> -->`, including clean reviews.
+
+If a marked ChatGPT review or conversation comment already exists, the preview
+extends the latest existing one instead of proposing another review. It preserves
+the old body exactly and appends a section with the checked SHA, commit checks,
+and new findings with validated path/line references. Follow-up findings go into
+that body rather than a second review with new inline comments. Do not repeat
+unresolved findings from earlier rounds.
+
+Such a preview has `review_preview: null` and a `comment_update_preview` containing
+`comment_kind`, `comment_id`, `reviewed_commit`, the full replacement `body`, and
+`expected_body_sha256` for the old body. A future publisher must check the live
+body hash, ownership, PR membership and head before updating. If the body changed,
+regenerate the preview rather than overwriting newer content. `comment_kind: issue`
+means a top-level issue comment; `comment_kind: review` means a submitted review
+body. They have different GitHub endpoints and IDs. If the connector cannot edit
+a review body, keep the update as a preview; do not create another review instead.
+
+GitHub keeps the original `commit_id` when a review body is edited. Discovery
+reads the latest marked SHA from its appended body when the visible SHA agrees,
+then uses that SHA for incremental review. It also recognizes bot-owned marked
+conversation comments. Pending/dismissed ChatGPT reviews are not checkpoints.
+
+Claude exclusions are checked in discovery and again during validation. Recognized
+authors are `claude[bot]`, `claude-code[bot]`, and unmarked legacy `openwrt-ai`
+output (requiring both the bot login and numeric ID). This legacy rule is needed
+because both reviewers used that account; it deliberately treats other unmarked
+output by that bot as already covered. Human mentions of Claude cannot trigger
+the exclusion. Inline ChatGPT comments need no separate marker when their parent
+review is marked. Never edit Claude's or another author's comments.
 
 Dry-run previews do not advance published completion. Repeated dry runs will
 review the same unpublished heads intentionally. Archive findings/previews and

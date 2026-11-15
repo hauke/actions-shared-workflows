@@ -243,11 +243,21 @@ def marker(sha):
     return f"<!-- {REVIEWER}:complete:{commit_sha(sha)} -->"
 
 
+def completion_sha(body):
+    matches = re.findall(
+        r"^<!-- chatgpt-work-v1:complete:([0-9a-f]{40}) -->\r?$",
+        body or "",
+        re.MULTILINE,
+    )
+    return matches[-1] if matches else None
+
+
 def last_review(reviews):
     """Only submitted COMMENT reviews with this reviewer's exact completion marker."""
     matches = []
     for review in reviews:
-        sha = review.get("commit_id", "")
+        body = review.get("body") or ""
+        sha = completion_sha(body)
         if (
             review.get("user", {}).get("login") == BOT
             and review.get("user", {}).get("id") == BOT_ID
@@ -255,11 +265,18 @@ def last_review(reviews):
             and review.get("submitted_at")
             and isinstance(sha, str)
             and SHA.fullmatch(sha)
-            and marker(sha) in (review.get("body") or "").splitlines()
+            and (sha == review.get("commit_id") or f"Reviewed commit: `{sha}`" in body)
         ):
-            matches.append(review)
+            # Editing a review body cannot change GitHub's original commit_id.
+            # The appended explicit checkpoint records the newly reviewed head.
+            matches.append({**review, "commit_id": sha})
     return max(
-        matches, key=lambda review: (review["submitted_at"], review["id"]), default=None
+        matches,
+        key=lambda review: (
+            review.get("updated_at") or review["submitted_at"],
+            review["id"],
+        ),
+        default=None,
     )
 
 
@@ -284,5 +301,11 @@ def snapshot(repository, pr, previous=None):
         "base_ref": pr["base"]["ref"],
         "head_repository": repo_name(head_repo["full_name"]),
         "previous_sha": commit_sha(previous["commit_id"]) if previous else None,
-        "previous_review_id": previous["id"] if previous else None,
+        "previous_review_id": previous["id"]
+        if previous and previous.get("comment_kind", "review") == "review"
+        else None,
+        "previous_comment_id": previous["id"] if previous else None,
+        "previous_comment_kind": previous.get("comment_kind", "review")
+        if previous
+        else None,
     }

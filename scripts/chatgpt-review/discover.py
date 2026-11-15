@@ -12,13 +12,13 @@ from common import (
     ReviewError,
     config_argument,
     emit,
-    last_review,
     positive_int,
     require,
     run_cli,
     snapshot,
 )
 from connector import client_argument, github_client
+from history import read_history
 
 
 def discover(api, policy, maximum=None, repository=None, number=None):
@@ -69,11 +69,13 @@ def discover(api, policy, maximum=None, repository=None, number=None):
                     number is None or pr_number == number,
                     "GitHub returned a different PR",
                 )
-                previous = last_review(
-                    api.pages(f"/repos/{repository}/pulls/{pr_number}/reviews")
-                )
+                _, _, _, claude, previous = read_history(api, repository, pr_number)
                 item = snapshot(repository, pr, previous)
-                if item["head_sha"] == item["previous_sha"]:
+                if claude:
+                    skipped.append(
+                        {**item, "reason": "Claude or legacy AI already commented"}
+                    )
+                elif item["head_sha"] == item["previous_sha"]:
                     skipped.append({**item, "reason": "already reviewed by ChatGPT"})
                 else:
                     candidates.append(item)

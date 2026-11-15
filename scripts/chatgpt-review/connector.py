@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from common import BOT, BOT_ID, GitHub, read_json, require
 
 RESOURCE = re.compile(
-    r"/repos/([^/]+/[^/]+)(?:/pulls(?:/[1-9][0-9]*(?:/(?:reviews|files|commits|comments))?)?)?\Z"
+    r"/repos/([^/]+/[^/]+)(?:/pulls(?:/[1-9][0-9]*(?:/(?:reviews|files|commits|comments))?)?|/issues/[1-9][0-9]*/comments)?\Z"
 )
 
 

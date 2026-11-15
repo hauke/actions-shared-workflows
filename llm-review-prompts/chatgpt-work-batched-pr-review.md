@@ -48,10 +48,17 @@ model contexts or an OS sandbox. Do not claim isolation that has not been tested
 
 In connector mode, first verify the authenticated account and collect the public
 repository metadata, selected open PR snapshots, and their complete review
-histories. Save normalized connector observations to `discovery-github.json` as
+histories, conversation comments, and inline comments. Save normalized connector observations to `discovery-github.json` as
 described in the setup guide. Pass `--github-snapshot <discovery-github.json>`
 to discovery. Do not invent data or completeness; report missing/truncated tool
 responses. A candidate list can be partial, and remaining work stays unknown.
+
+Skip a PR if Claude has already commented, even if its head has since changed.
+The scripts recognize `claude[bot]`, `claude-code[bot]`, and legacy unmarked output
+by `openwrt-ai` (the account previously used for Claude). This is an explicit
+legacy-account convention, not model-based attribution. Do not classify human
+comments that merely mention Claude. Preserve and extend only marked ChatGPT
+comments owned by `openwrt-ai`; never edit Claude's or another user's comments.
 
 1. Run `scripts/chatgpt-review/discover.py --config <policy>` from the trusted
    checkout using `python3 -E -s`. Save stdout as `discovery.json` in the output
@@ -143,10 +150,16 @@ branch links. A CI comment can include a short fenced log excerpt and the
 specific causal change; no CI summary belongs in the body.
 
 Each `commit_checks` entry contains `sha` and a single-line `message` stating
-the mismatch and correction. There is no arbitrary review-body field. The
-validator constructs commit-check bullets and a hidden ChatGPT completion marker;
-a clean review preview contains only that marker. This distinguishes ChatGPT
-completion from earlier Claude submissions by the same account.
+the mismatch and correction. There is no arbitrary review-body field. Every
+review section includes the visible full `Reviewed commit: <SHA>` and a hidden
+completion marker. If a marked ChatGPT conversation comment or submitted review
+already exists, the validator preserves its entire body and appends the new
+section, including any new findings with validated file/line references.
+Do not propose a second review just to add inline comments: the update preview
+targets the existing comment/review ID. Do not repeat issues already raised.
+A first review can still use line-anchored comments. A clean follow-up records
+the SHA without inventing findings. Discovery reads the latest checkpoint from
+the extended body, since editing a review body does not change its commit_id.
 
 For a previous ChatGPT finding proved fixed at the current head, optionally add
 `{"comment_id": <root-comment-id>, "evidence": "<specific fix>"}` to
@@ -171,7 +184,7 @@ separate `fixed, thanks` reply preview, never resolves a thread or posts anythin
    `python3 -E -s`, saving stdout per PR. Any nonzero exit means validation failed.
    Never hand-edit a validated preview to bypass a failure.
    In connector mode, re-read repository/PR metadata, head/base SHAs, reviews,
-   changed-file patches, and any required commit/reply data immediately before
+   conversation comments, inline comments, changed-file patches, and required commit data immediately before
    validation. Save a NEW capture as `validation-github.json`, and append
    `--github-snapshot <validation-github.json>` to the validation command. Do not
    reuse the discovery capture. Records must contain complete actual connector
@@ -179,6 +192,9 @@ separate `fixed, thanks` reply preview, never resolves a thread or posts anythin
    observation to the identity file as usual. Snapshot-based previews must be
    identified as `live_revalidation: false`; they are never proof of live API
    revalidation or authorization to publish.
+   Inspect `comment_update_preview` when present: it replaces creating another
+   review and preserves earlier text. Do not turn an unavailable update operation
+   into a new comment/review. Publishing remains disabled.
 4. Stop after creating the previews. Validation rechecks public PR state, head,
    base, diff anchors, existing completion markers, and reply eligibility, but
    cannot authorize publication, prove semantic correctness, or prevent a later

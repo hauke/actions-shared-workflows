@@ -25,6 +25,7 @@ from common import (
     snapshot,
 )
 from connector import client_argument, github_client
+from history import read_history
 
 HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:.*)\Z")
 
@@ -270,8 +271,10 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         return pr
 
     pr = current_pr()
-    reviews = list(api.pages(endpoint + "/reviews"))
-    completed = last_review(reviews)
+    reviews, _, existing_inline, claude, completed = read_history(
+        api, repository, number
+    )
+    require(not claude, "Claude or legacy AI already commented; skip this PR")
     require(
         not completed or completed["commit_id"] != head,
         "this head already has a completed ChatGPT review",
@@ -308,7 +311,7 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         require(fingerprint not in seen, "duplicate inline finding")
         seen.add(fingerprint)
         inline.append(payload)
-    body_lines = []
+    body_lines = [f"Reviewed commit: `{head}`", ""]
     if checks:
         require(
             pr["commits"] <= 250,
@@ -332,8 +335,14 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
                 "invalid commit-check message",
             )
             body_lines.append(f"- {check['sha'][:12]}: {message}")
-    # A clean review needs a nonempty connector body. The hidden marker records
-    # completion without a summary or visible 'no issues found' boilerplate.
+    if completed and inline:
+        # Reuse the existing comment/review instead of opening another review
+        # just to attach new inline comments. Locations remain diff-validated.
+        body_lines.extend(["", "## Findings"])
+        for comment in inline:
+            body_lines.append(
+                f"- `{comment['path']}:{comment['line']}` ({comment['side']}): {comment['body']}"
+            )
     body_lines.extend(["", marker(head)])
     body = "\n".join(body_lines).strip()
     require(len(body) <= 10000, "review body is too large")
@@ -341,7 +350,7 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         fixes,
         threads,
         reviews,
-        list(api.pages(endpoint + "/comments")) if fixes else [],
+        existing_inline if fixes else [],
         repository,
         number,
         head,
@@ -356,8 +365,29 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         "review": body,
         "file_comments": inline,
     }
+    update = None
+    if completed:
+        old_body = completed.get("body") or ""
+        extended = old_body + "\n\n---\n\n" + body
+        require(
+            len(extended) <= 60000,
+            "extended bot comment exceeds size limit; archive history manually",
+        )
+        update = {
+            "repo_full_name": repository,
+            "pr_number": number,
+            "comment_kind": completed["comment_kind"],
+            "comment_id": completed["id"],
+            "reviewed_commit": head,
+            "body": extended,
+            "expected_body_sha256": hashlib.sha256(old_body.encode()).hexdigest(),
+        }
+        payload = None
     digest = hashlib.sha256(
-        json.dumps({"review": payload, "replies": replies}, sort_keys=True).encode()
+        json.dumps(
+            {"review": payload, "comment_update": update, "replies": replies},
+            sort_keys=True,
+        ).encode()
     ).hexdigest()
     return {
         "version": 1,
@@ -370,6 +400,7 @@ def validate(findings, manifest, policy, api, identity, threads=None, now=None):
         "expected_base_sha": base,
         "payload_sha256": digest,
         "review_preview": payload,
+        "comment_update_preview": update,
         "reply_previews": replies,
     }
 

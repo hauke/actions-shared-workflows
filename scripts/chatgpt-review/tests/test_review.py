@@ -1,6 +1,7 @@
 """Offline discovery/validation tests. No GitHub writes or model calls."""
 
 import copy
+import hashlib
 import importlib.util
 import json
 import sys
@@ -75,6 +76,17 @@ def review(sha=HEAD, **overrides):
     }
 
 
+def agent_comment(sha=PREVIOUS, **overrides):
+    return {
+        "id": 20,
+        "user": {"login": BOT, "id": BOT_ID},
+        "created_at": "2026-11-13T12:00:00Z",
+        "updated_at": "2026-11-13T12:00:00Z",
+        "body": f"Reviewed commit: `{sha}`\n\nEarlier finding.\n\n{marker(sha)}",
+        **overrides,
+    }
+
+
 class FakeAPI(GitHub):
     def __init__(self, routes):
         self.routes, self.calls = routes, []
@@ -103,6 +115,7 @@ def api_routes():
         ],
         endpoint + "/pulls/1/commits?per_page=100&page=1": [{"sha": HEAD}],
         endpoint + "/pulls/1/comments?per_page=100&page=1": [],
+        endpoint + "/issues/1/comments?per_page=100&page=1": [],
     }
 
 
@@ -153,11 +166,81 @@ class DiscoveryTests(unittest.TestCase):
             discover(FakeAPI(self.routes), policy())["prs"][0]["previous_sha"], PREVIOUS
         )
 
-    def test_claude_review_is_not_a_chatgpt_completion(self):
+    def test_legacy_claude_review_skips_pr(self):
         self.routes[self.reviews] = [
             review(body="Reviewed commits; no new issues found.")
         ]
+        result = discover(FakeAPI(self.routes), policy())
+        self.assertEqual(result["prs"], [])
+        self.assertIn("Claude", result["skipped"][0]["reason"])
+
+    def test_official_claude_review_skips_even_after_head_changes(self):
+        self.routes[self.reviews] = [
+            review(PREVIOUS, user={"login": "claude[bot]", "id": 1})
+        ]
+        result = discover(FakeAPI(self.routes), policy())
+        self.assertEqual(result["prs"], [])
+        self.assertIn("Claude", result["skipped"][0]["reason"])
+
+    def test_legacy_bot_conversation_comment_skips(self):
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            agent_comment(body="Claude found an issue.")
+        ]
+        self.assertEqual(discover(FakeAPI(self.routes), policy())["prs"], [])
+
+    def test_human_mention_of_claude_is_not_a_skip(self):
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            agent_comment(
+                body="Claude already reviewed this; please skip",
+                user={"login": "contributor", "id": 123},
+            )
+        ]
         self.assertEqual(len(discover(FakeAPI(self.routes), policy())["prs"]), 1)
+
+    def test_claude_inline_reply_also_skips(self):
+        self.routes[f"/repos/{REPOSITORY}/pulls/1/comments?per_page=100&page=1"] = [
+            {
+                "id": 21,
+                "user": {"login": "claude[bot]", "id": 1},
+                "pull_request_review_id": 123,
+            }
+        ]
+        self.assertEqual(discover(FakeAPI(self.routes), policy())["prs"], [])
+
+    def test_unmarked_inline_finding_under_own_review_is_not_claude(self):
+        self.routes[self.reviews] = [review(PREVIOUS)]
+        self.routes[f"/repos/{REPOSITORY}/pulls/1/comments?per_page=100&page=1"] = [
+            {
+                "id": 21,
+                "user": {"login": BOT, "id": BOT_ID},
+                "pull_request_review_id": 10,
+                "body": "Earlier ChatGPT finding without a per-comment marker",
+            }
+        ]
+        self.assertEqual(len(discover(FakeAPI(self.routes), policy())["prs"]), 1)
+
+    def test_conversation_comment_pagination_detects_claude(self):
+        path = f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page="
+        self.routes[path + "1"] = [
+            agent_comment(user={"login": "human", "id": 1})
+        ] * 100
+        self.routes[path + "2"] = [agent_comment(body="Legacy Claude review")]
+        self.assertEqual(discover(FakeAPI(self.routes), policy())["prs"], [])
+
+    def test_chatgpt_conversation_checkpoint_skips_same_head(self):
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            agent_comment(HEAD)
+        ]
+        result = discover(FakeAPI(self.routes), policy())
+        self.assertEqual(result["prs"], [])
+        self.assertIn("ChatGPT", result["skipped"][0]["reason"])
+
+    def test_updated_review_checkpoint_uses_visible_sha_not_original_anchor(self):
+        body = marker(PREVIOUS) + f"\n\nReviewed commit: `{HEAD}`\n\n" + marker(HEAD)
+        self.routes[self.reviews] = [review(PREVIOUS, body=body)]
+        result = discover(FakeAPI(self.routes), policy())
+        self.assertEqual(result["prs"], [])
+        self.assertEqual(result["skipped"][0]["previous_sha"], HEAD)
 
     def test_pending_dismissed_other_identity_and_wrong_marker_do_not_count(self):
         for item in (
@@ -180,6 +263,11 @@ class DiscoveryTests(unittest.TestCase):
             last_review([review(body="Commit message includes " + marker(HEAD))])
         )
 
+    def test_checkpoint_accepts_crlf_body(self):
+        self.assertEqual(
+            last_review([review(body=marker(HEAD) + "\r\n")])["commit_id"], HEAD
+        )
+
     def test_review_pagination(self):
         self.routes[self.reviews] = [review(user={"login": "someone", "id": 1})] * 100
         self.routes[self.reviews.removesuffix("page=1") + "page=2"] = [review()]
@@ -195,6 +283,10 @@ class DiscoveryTests(unittest.TestCase):
         ] = [pr(101)]
         for number in range(1, 102):
             self.routes[f"{endpoint}/{number}/reviews?per_page=100&page=1"] = []
+            self.routes[
+                f"/repos/{REPOSITORY}/issues/{number}/comments?per_page=100&page=1"
+            ] = []
+            self.routes[f"{endpoint}/{number}/comments?per_page=100&page=1"] = []
         result = discover(FakeAPI(self.routes), policy())
         self.assertEqual(len(result["prs"]), 8)
         self.assertIsNone(result["deferred"])
@@ -206,8 +298,8 @@ class DiscoveryTests(unittest.TestCase):
         api = FakeAPI(self.routes)
         result = discover(api, policy(), maximum=1)
         self.assertEqual(len(result["prs"]), 1)
-        # Public-repo metadata, first listing page, selected PR's reviews only.
-        self.assertEqual(len(api.calls), 3)
+        # Metadata, first listing page, selected PR's reviews and conversation.
+        self.assertEqual(len(api.calls), 5)
 
     def test_pr_pagination_after_skipping_unchanged_heads(self):
         endpoint = f"/repos/{REPOSITORY}/pulls"
@@ -218,6 +310,10 @@ class DiscoveryTests(unittest.TestCase):
             self.routes[f"{endpoint}/{n}/reviews?per_page=100&page=1"] = (
                 [review()] if n <= 100 else []
             )
+            self.routes[
+                f"/repos/{REPOSITORY}/issues/{n}/comments?per_page=100&page=1"
+            ] = []
+            self.routes[f"{endpoint}/{n}/comments?per_page=100&page=1"] = []
         result = discover(FakeAPI(self.routes), policy())
         self.assertEqual([item["number"] for item in result["prs"]], [101])
         self.assertEqual(len(result["skipped"]), 100)
@@ -229,7 +325,13 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual([item["number"] for item in result["prs"]], [1])
         self.assertEqual(
             api.calls,
-            [f"/repos/{REPOSITORY}", f"/repos/{REPOSITORY}/pulls/1", self.reviews],
+            [
+                f"/repos/{REPOSITORY}",
+                f"/repos/{REPOSITORY}/pulls/1",
+                self.reviews,
+                f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1",
+                f"/repos/{REPOSITORY}/pulls/1/comments?per_page=100&page=1",
+            ],
         )
         self.assertTrue(result["scan_complete"])
 
@@ -243,6 +345,8 @@ class DiscoveryTests(unittest.TestCase):
             f"/repos/{other}/pulls?state=open&sort=updated&direction=asc&per_page=100&page=1"
         ] = [item]
         self.routes[f"/repos/{other}/pulls/2/reviews?per_page=100&page=1"] = []
+        self.routes[f"/repos/{other}/issues/2/comments?per_page=100&page=1"] = []
+        self.routes[f"/repos/{other}/pulls/2/comments?per_page=100&page=1"] = []
         api = FakeAPI(self.routes)
         result = discover(api, policy(repositories=[REPOSITORY, other]), maximum=1)
         self.assertEqual(result["prs"][0]["repository"], other)
@@ -454,11 +558,74 @@ class ValidationTests(unittest.TestCase):
         result = self.validate()
         self.assertFalse(result["publishing_enabled"])
         self.assertEqual(result["review_preview"]["commit_id"], HEAD)
-        self.assertEqual(result["review_preview"]["review"], marker(HEAD))
+        self.assertIn(marker(HEAD), result["review_preview"]["review"])
+        self.assertIn(f"Reviewed commit: `{HEAD}`", result["review_preview"]["review"])
 
     def test_clean_review_still_has_completion_marker(self):
         self.data["comments"] = []
-        self.assertEqual(self.validate()["review_preview"]["review"], marker(HEAD))
+        self.assertIn(marker(HEAD), self.validate()["review_preview"]["review"])
+
+    def test_existing_review_is_extended_instead_of_creating_another(self):
+        original = review(PREVIOUS, body="Earlier finding.\n\n" + marker(PREVIOUS))
+        self.routes[f"/repos/{REPOSITORY}/pulls/1/reviews?per_page=100&page=1"] = [
+            original
+        ]
+        result = self.validate()
+        self.assertIsNone(result["review_preview"])
+        update = result["comment_update_preview"]
+        self.assertEqual(update["comment_kind"], "review")
+        self.assertEqual(update["comment_id"], original["id"])
+        self.assertTrue(update["body"].startswith(original["body"] + "\n\n---\n\n"))
+        self.assertIn(f"Reviewed commit: `{HEAD}`", update["body"])
+        self.assertIn(self.data["comments"][0]["body"], update["body"])
+        self.assertEqual(
+            update["expected_body_sha256"],
+            hashlib.sha256(original["body"].encode()).hexdigest(),
+        )
+
+    def test_existing_conversation_comment_is_extended(self):
+        original = agent_comment()
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            original
+        ]
+        result = self.validate()
+        self.assertIsNone(result["review_preview"])
+        update = result["comment_update_preview"]
+        self.assertEqual(update["comment_kind"], "issue")
+        self.assertEqual(update["comment_id"], 20)
+        self.assertTrue(update["body"].startswith(original["body"]))
+
+    def test_extension_does_not_silently_truncate_old_content(self):
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            agent_comment(
+                body="x" * 60000
+                + f"\nReviewed commit: `{PREVIOUS}`\n"
+                + marker(PREVIOUS)
+            )
+        ]
+        with self.assertRaisesRegex(ReviewError, "archive history"):
+            self.validate()
+
+    def test_claude_review_arriving_after_discovery_blocks_validation(self):
+        self.routes[f"/repos/{REPOSITORY}/pulls/1/reviews?per_page=100&page=1"] = [
+            review(body="Legacy Claude output")
+        ]
+        with self.assertRaisesRegex(ReviewError, "Claude"):
+            self.validate()
+
+    def test_claude_comment_arriving_after_discovery_blocks_validation(self):
+        self.routes[f"/repos/{REPOSITORY}/issues/1/comments?per_page=100&page=1"] = [
+            agent_comment(body="Legacy Claude output")
+        ]
+        with self.assertRaisesRegex(ReviewError, "Claude"):
+            self.validate()
+
+    def test_claude_inline_arriving_after_discovery_blocks_validation(self):
+        self.routes[f"/repos/{REPOSITORY}/pulls/1/comments?per_page=100&page=1"] = [
+            {"id": 21, "user": {"login": "claude[bot]", "id": 1}}
+        ]
+        with self.assertRaisesRegex(ReviewError, "Claude"):
+            self.validate()
 
     def test_wrong_identity_and_stale_evidence(self):
         for changes in (
